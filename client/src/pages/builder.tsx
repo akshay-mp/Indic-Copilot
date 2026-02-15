@@ -38,6 +38,7 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
   const voiceRef = useRef<any>(null);
 
   const sendMessageRef = useRef<(text: string) => void>(() => {});
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const handleVoiceResult = useCallback((text: string) => {
     setInputText(text);
@@ -126,10 +127,17 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
     );
 
     try {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       const response = await fetch(`/api/conversations/${activeConvId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: text, language }),
+        signal: controller.signal,
       });
 
       if (!response.ok) throw new Error("Failed to send message");
@@ -207,7 +215,14 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        setIsStreaming(false);
+        setIsBuildingApp(false);
+        setPendingSend(false);
+        setStreamingContent("");
+        return;
+      }
       toast({ title: "Error", description: "Failed to send message. Please try again.", variant: "destructive" });
       setIsStreaming(false);
       setIsBuildingApp(false);
@@ -219,6 +234,25 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
   useEffect(() => {
     sendMessageRef.current = sendMessage;
   }, [sendMessage]);
+
+  useEffect(() => {
+    setVoiceMode(false);
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      const v = voiceRef.current;
+      if (v) {
+        if (v.isListening) v.stopListening();
+        if (v.isSpeaking) v.stopSpeaking();
+      }
+      setIsStreaming(false);
+      setIsBuildingApp(false);
+      setPendingSend(false);
+      setStreamingContent("");
+    };
+  }, [conversationId]);
 
   const handleSubmit = () => {
     sendMessage(inputText);
