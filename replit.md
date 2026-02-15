@@ -13,7 +13,7 @@ Voice-driven AI app builder that lets users create web applications through voic
 ## Architecture
 - **Frontend**: React + TypeScript + Vite + TanStack Query + Tailwind CSS + shadcn/ui
 - **Backend**: Express.js + PostgreSQL (Drizzle ORM) + Anthropic Claude SDK
-- **Voice**: Browser Web Speech API (SpeechRecognition + SpeechSynthesis)
+- **Voice**: Silero VAD (@ricky0123/vad-web, ONNX) + Web Speech API (STT) + SpeechSynthesis (TTS)
 - **AI**: Replit AI Integrations for Anthropic (no API key needed)
 
 ## Project Structure
@@ -21,7 +21,8 @@ Voice-driven AI app builder that lets users create web applications through voic
 - `client/src/pages/dashboard.tsx` - Generated apps dashboard
 - `client/src/pages/plant-doctor.tsx` - Plant disease identifier
 - `client/src/components/` - Reusable UI components
-- `client/src/hooks/use-voice.ts` - Web Speech API hook
+- `client/src/hooks/use-voice.ts` - Voice hook (Silero VAD + Web Speech API)
+- `client/src/components/voice-button.tsx` - Mic button with VAD visual feedback
 - `server/routes.ts` - All API endpoints
 - `server/storage.ts` - Database CRUD operations
 - `shared/schema.ts` - Drizzle schema (conversations, messages, generatedApps)
@@ -38,6 +39,13 @@ Voice-driven AI app builder that lets users create web applications through voic
 2. User approves the plan (says "yes", "approve", etc.)
 3. Build phase: Claude generates a complete HTML app
 4. App is saved and viewable in the dashboard
+
+## Voice Architecture (Voice Sandwich)
+- **VAD**: Silero VAD v5 running in browser via ONNX Runtime Web (@ricky0123/vad-web)
+- **STT**: Browser Web Speech API (SpeechRecognition) - supports 20+ Indian languages via Chrome
+- **TTS**: Browser SpeechSynthesis API
+- **Flow**: Click mic → VAD + STT start → Silero detects speech start/end → auto-send after silence → Claude responds
+- **Assets**: ONNX model + worklet + WASM files in client/public/
 
 ## Running
 - `npm run dev` starts Express + Vite on port 5000
