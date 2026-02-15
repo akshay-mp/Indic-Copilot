@@ -332,7 +332,7 @@ export async function registerRoutes(
 
       const stream = anthropic.messages.stream({
         model: "claude-sonnet-4-5",
-        max_tokens: 8192,
+        max_tokens: shouldBuildApp ? 16384 : 8192,
         system: systemPrompt,
         messages: chatMessages,
       });
@@ -354,6 +354,17 @@ export async function registerRoutes(
       if (shouldBuildApp) {
         let htmlContent = extractHtmlFromResponse(fullResponse);
         console.log(`[BUILD] HTML extraction result: ${htmlContent ? `success (${htmlContent.length} chars)` : "FAILED"}`);
+        
+        if (htmlContent && !htmlContent.includes("</html>")) {
+          console.warn("[BUILD] WARNING: Generated HTML appears truncated (missing </html> closing tag). Appending closing tags.");
+          if (!htmlContent.includes("</script>")) {
+            htmlContent += "\n    </script>";
+          }
+          if (!htmlContent.includes("</body>")) {
+            htmlContent += "\n</body>";
+          }
+          htmlContent += "\n</html>";
+        }
 
         if (htmlContent) {
           const titleMatch = htmlContent.match(/<title>(.*?)<\/title>/i);
@@ -639,6 +650,32 @@ export async function registerRoutes(
       return window.AppAI.ask(prompt||'Analyze this image in detail.',file);
     }
   };
+  setTimeout(function(){
+    if(typeof window.showAlert==='undefined'){
+      window.showAlert=function(msg,type){
+        var el=document.getElementById('alertContainer')||document.getElementById('alert');
+        if(!el)return;
+        el.innerHTML='<div style="padding:12px 16px;border-radius:8px;margin-bottom:12px;'+(type==='error'||type==='danger'?'background:#ffebee;color:#c62828;border-left:4px solid #f44336;':'background:#e8f5e9;color:#2e7d32;border-left:4px solid #4caf50;')+'">'+msg+'</div>';
+        if(type!=='error'&&type!=='danger'){setTimeout(function(){if(typeof window.hideAlert==='function')window.hideAlert();else if(el)el.innerHTML='';},3000);}
+      };
+    }
+    if(typeof window.hideAlert==='undefined'){
+      window.hideAlert=function(){
+        var el=document.getElementById('alertContainer')||document.getElementById('alert');
+        if(el)el.innerHTML='';
+      };
+    }
+    if(typeof window.formatDateTime==='undefined'){
+      window.formatDateTime=function(d){
+        if(!(d instanceof Date)||isNaN(d))return '';
+        return d.getDate().toString().padStart(2,'0')+'/'+
+          (d.getMonth()+1).toString().padStart(2,'0')+'/'+
+          d.getFullYear()+' '+
+          d.getHours().toString().padStart(2,'0')+':'+
+          d.getMinutes().toString().padStart(2,'0');
+      };
+    }
+  },0);
 })();
 </script>`;
 
