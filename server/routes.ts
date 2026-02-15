@@ -272,20 +272,21 @@ export async function registerRoutes(
       const langName = getLanguageName(activeLanguage);
 
       const approvalWords = [
-        "yes", "approve", "build it", "go ahead", "okay", "sure", "do it", "let's go", "start",
-        "haan", "theek hai", "chalo", "banao", "shuru karo", "ho jayega",
-        "ಹೌದು", "ಸರಿ", "ಮಾಡು", "ಮಾಡಿ", "ಶುರು ಮಾಡಿ", "ಒಪ್ಪುತ್ತೇನೆ", "ಹೋಗುತ್ತೇನೆ", "ಮುಂದುವರಿ", "ಆಗಲಿ", "ಮಾಡಿಕೊಡಿ",
+        "yes", "approve", "build it", "go ahead", "sure", "do it", "let's go",
+        "haan", "theek hai", "banao", "shuru karo",
+        "ಹೌದು", "ಒಪ್ಪುತ್ತೇನೆ", "ಶುರು ಮಾಡಿ", "ಮಾಡಿಕೊಡಿ", "ಕಟ್ಟು", "ಕಟ್ಟಿ", "ರೆಡಿ",
         "சரி", "ஆமா", "செய்யுங்கள்", "தொடங்கு",
-        "అవును", "సరి", "చేయండి", "మొదలు పెట్టండి",
+        "అవును", "చేయండి", "మొదలు పెట్టండి",
         "ശരി", "ചെയ്യൂ", "തുടങ്ങൂ",
-        "हां", "हाँ", "करो", "बनाओ", "ठीक है", "शुरू करो", "चलो",
-        "হ্যাঁ", "করো", "শুরু করো",
-        "હા", "કરો", "શરૂ કરો",
-        "ਹਾਂ", "ਕਰੋ", "ਸ਼ੁਰੂ ਕਰੋ",
-        "ହଁ", "କର",
+        "हां", "हाँ", "बनाओ", "शुरू करो",
+        "হ্যাঁ", "শুরু করো",
+        "હા", "શરૂ કરો",
+        "ਹਾਂ", "ਸ਼ੁਰੂ ਕਰੋ",
+        "ହଁ",
       ];
       const contentLower = content.trim().toLowerCase();
-      const isApproval = approvalWords.some(w => {
+      const isShortApproval = content.trim().length < 60;
+      const isApproval = isShortApproval && approvalWords.some(w => {
         const word = w.toLowerCase();
         if (/^[a-z\s]+$/.test(word)) {
           const regex = new RegExp(`\\b${word}\\b`, "i");
@@ -294,7 +295,11 @@ export async function registerRoutes(
         return contentLower.includes(word);
       });
       const assistantMessages = existingMessages.filter(m => m.role === "assistant");
-      const hasPlan = assistantMessages.length >= 2 && conv.phase === "planning";
+      const lastAssistantMsg = assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1].content : "";
+      const planIndicators = ["?", "ಕಟ್ಟಲಾ", "ಮುಂದುವರಿಯಲಾ", "ಒಪ್ಪುತ್ತೀರಾ", "build", "approve", "ready",
+        "बनाएं", "शुरू", "செய்யலாமா", "చేయమంటారా", "ചെയ്യട്ടെ", "কর", "કરું", "ਕਰਾਂ", "କରିବା"];
+      const lastMsgAskedForApproval = planIndicators.some(p => lastAssistantMsg.toLowerCase().includes(p.toLowerCase()));
+      const hasPlan = assistantMessages.length >= 3 && conv.phase === "planning" && lastMsgAskedForApproval;
 
       let systemPrompt: string;
       let shouldBuildApp = false;
