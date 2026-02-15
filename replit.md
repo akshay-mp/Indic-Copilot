@@ -9,31 +9,53 @@ Voice-driven AI app builder that lets users create web applications through voic
 - App generation: Claude generates complete HTML/CSS/JS apps
 - Dashboard to manage all generated apps with fullscreen preview
 - Generated apps have database persistence (AppDB) and AI capabilities (AppAI with vision)
+- Email/password authentication with user-scoped workspaces
+- App sharing via unique share links (WhatsApp integration)
+- Clone shared apps into your own workspace
 
 ## Architecture
 - **Frontend**: React + TypeScript + Vite + TanStack Query + Tailwind CSS + shadcn/ui
 - **Backend**: Express.js + PostgreSQL (Drizzle ORM) + Anthropic Claude SDK
+- **Auth**: Passport.js (local strategy, email/password) + express-session + connect-pg-simple
 - **Voice**: Silero VAD (@ricky0123/vad-web, ONNX) + Web Speech API (STT) + SpeechSynthesis (TTS)
 - **AI**: Replit AI Integrations for Anthropic (no API key needed)
 
 ## Project Structure
 - `client/src/pages/builder.tsx` - Main voice chat builder interface
 - `client/src/pages/dashboard.tsx` - Generated apps dashboard
+- `client/src/pages/auth.tsx` - Login/register page
+- `client/src/pages/shared-app.tsx` - Public shared app viewer
+- `client/src/hooks/use-auth.tsx` - Auth hook (AuthProvider, useAuth)
 - `client/src/components/` - Reusable UI components
 - `client/src/hooks/use-voice.ts` - Voice hook (Silero VAD + Web Speech API)
 - `client/src/components/voice-overlay.tsx` - Voice mode side panel (right side, chat stays visible on left)
 - `client/src/components/particle-sphere.tsx` - Canvas-based animated atom visualization (orbiting electrons, reacts to voice states)
 - `client/src/components/voice-button.tsx` - Mic button with VAD visual feedback (used in non-overlay contexts)
 - `server/routes.ts` - All API endpoints
+- `server/auth.ts` - Passport.js auth setup (register, login, logout, session)
 - `server/storage.ts` - Database CRUD operations
-- `shared/schema.ts` - Drizzle schema (conversations, messages, generatedApps, appStorage)
+- `shared/schema.ts` - Drizzle schema (users, conversations, messages, generatedApps, appStorage)
 
 ## API Routes
-- `GET/POST/DELETE /api/conversations` - Conversation CRUD
+### Auth (public)
+- `POST /api/register` - Create account (email, password, name)
+- `POST /api/login` - Sign in (email, password)
+- `POST /api/logout` - Sign out
+- `GET /api/user` - Get current user (401 if not logged in)
+
+### Protected (require auth)
+- `GET/POST/DELETE /api/conversations` - Conversation CRUD (user-scoped)
 - `GET /api/conversations/:id` - Get conversation with messages
 - `POST /api/conversations/:id/messages` - Send message (SSE streaming)
-- `GET/DELETE /api/apps` - Generated apps CRUD
+- `GET/DELETE /api/apps` - Generated apps CRUD (user-scoped)
 - `GET /api/apps/:id/serve` - Serves app HTML with injected AppDB + AppAI helpers
+- `POST /api/apps/:id/share` - Generate share link for app
+- `DELETE /api/apps/:id/share` - Disable sharing
+
+### Public
+- `GET /api/shared/:shareId` - Get shared app metadata
+- `GET /api/shared/:shareId/serve` - Serve shared app HTML
+- `POST /api/shared/:shareId/clone` - Clone shared app (requires auth)
 - `GET/POST/PUT/DELETE /api/app-storage/:appId/:collection[/:docId]` - Document storage for generated apps
 - `POST /api/app-ai/chat` - AI proxy for generated apps (supports text + vision/images)
 - `POST /api/tts` - Text-to-speech via Sarvam AI REST API (bulbul:v3, speaker: shubh, returns WAV audio)

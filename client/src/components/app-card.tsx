@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,9 +15,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Maximize2, Trash2, Calendar } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Maximize2, Trash2, Calendar, Share2, Copy, Check, ExternalLink } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import type { GeneratedApp } from "@shared/schema";
 import { getLanguageName } from "@/lib/languages";
+import { useToast } from "@/hooks/use-toast";
 
 interface AppCardProps {
   app: GeneratedApp;
@@ -24,6 +36,56 @@ interface AppCardProps {
 
 export function AppCard({ app, onOpen, onDelete }: AppCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareId, setShareId] = useState<string | null>(app.shareId || null);
+  const [copied, setCopied] = useState(false);
+  const { toast } = useToast();
+
+  const shareMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/apps/${app.id}/share`);
+      return res.json();
+    },
+    onSuccess: (data: { shareId: string }) => {
+      setShareId(data.shareId);
+      queryClient.invalidateQueries({ queryKey: ["/api/apps"] });
+    },
+  });
+
+  const unshareMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("DELETE", `/api/apps/${app.id}/share`);
+    },
+    onSuccess: () => {
+      setShareId(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/apps"] });
+      toast({ title: "Sharing disabled" });
+    },
+  });
+
+  const handleShare = () => {
+    if (shareId) {
+      setShowShareDialog(true);
+    } else {
+      shareMutation.mutate(undefined, {
+        onSuccess: () => setShowShareDialog(true),
+      });
+    }
+  };
+
+  const shareUrl = shareId ? `${window.location.origin}/shared/${shareId}` : "";
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast({ title: "Link copied" });
+  };
+
+  const shareWhatsApp = () => {
+    const text = `Check out "${app.title}" - built with Indic Copilot!\n${shareUrl}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
 
   return (
     <>
@@ -62,6 +124,17 @@ export function AppCard({ app, onOpen, onDelete }: AppCardProps) {
               {new Date(app.createdAt).toLocaleDateString()}
             </span>
             <div className="flex items-center gap-1">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare();
+                }}
+                data-testid={`button-share-app-${app.id}`}
+              >
+                <Share2 className="w-4 h-4" />
+              </Button>
               <Button
                 size="icon"
                 variant="ghost"
@@ -106,6 +179,66 @@ export function AppCard({ app, onOpen, onDelete }: AppCardProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle data-testid="text-share-title">Share "{app.title}"</DialogTitle>
+            <DialogDescription>
+              Anyone with this link can view and use your app.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={shareUrl}
+                className="flex-1"
+                data-testid="input-share-url"
+              />
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={copyLink}
+                data-testid="button-copy-link"
+              >
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={shareWhatsApp}
+                data-testid="button-share-whatsapp"
+              >
+                <SiWhatsapp className="w-4 h-4 mr-2" />
+                Share on WhatsApp
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => window.open(shareUrl, "_blank")}
+                data-testid="button-open-shared"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Open App
+              </Button>
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full text-destructive"
+              onClick={() => {
+                unshareMutation.mutate();
+                setShowShareDialog(false);
+              }}
+              data-testid="button-disable-sharing"
+            >
+              Disable Sharing
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -6,12 +6,44 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import Builder from "@/pages/builder";
 import Dashboard from "@/pages/dashboard";
+import AuthPage from "@/pages/auth";
+import SharedAppPage from "@/pages/shared-app";
+import { Loader2 } from "lucide-react";
+
+function getSharedId(): string | null {
+  const match = window.location.pathname.match(/^\/shared\/([^/]+)/);
+  return match ? match[1] : null;
+}
 
 function AppContent() {
+  const sharedId = getSharedId();
+
+  if (sharedId) {
+    return <SharedAppPage shareId={sharedId} />;
+  }
+
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
+  const { user, isLoading } = useAuth();
   const [activePage, setActivePage] = useState("builder");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage />;
+  }
 
   const handleNavigate = (page: string) => {
     setActivePage(page);
@@ -77,7 +109,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <AppContent />
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

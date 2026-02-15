@@ -6,6 +6,7 @@ import { generatedApps } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import WebSocket from "ws";
+import { randomUUID } from "crypto";
 
 
 const anthropic = new Anthropic({
@@ -190,21 +191,29 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  function requireAuth(req: any, res: any, next: any) {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    next();
+  }
+
   // --- Conversations ---
-  app.get("/api/conversations", async (_req, res) => {
+  app.get("/api/conversations", requireAuth, async (req: any, res) => {
     try {
-      const convs = await storage.getAllConversations();
+      const convs = await storage.getAllConversations(req.user.id);
       res.json(convs);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch conversations" });
     }
   });
 
-  app.get("/api/conversations/:id", async (req, res) => {
+  app.get("/api/conversations/:id", requireAuth, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const conv = await storage.getConversation(id);
       if (!conv) return res.status(404).json({ error: "Not found" });
+      if (conv.userId && conv.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
       const msgs = await storage.getMessagesByConversation(id);
       res.json({ ...conv, messages: msgs });
     } catch (error) {
@@ -212,13 +221,14 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/conversations", async (req, res) => {
+  app.post("/api/conversations", requireAuth, async (req: any, res) => {
     try {
       const { title, language } = req.body;
       const conv = await storage.createConversation({
         title: title || "New App",
         language: language || "en-US",
         phase: "planning",
+        userId: req.user.id,
       });
       res.status(201).json(conv);
     } catch (error) {
@@ -226,9 +236,11 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/conversations/:id", async (req, res) => {
+  app.delete("/api/conversations/:id", requireAuth, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
+      const conv = await storage.getConversation(id);
+      if (conv && conv.userId && conv.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
       await storage.deleteConversation(id);
       res.status(204).send();
     } catch (error) {
@@ -237,7 +249,7 @@ export async function registerRoutes(
   });
 
   // --- Chat with streaming ---
-  app.post("/api/conversations/:id/messages", async (req, res) => {
+  app.post("/api/conversations/:id/messages", requireAuth, async (req: any, res) => {
     try {
       const conversationId = parseInt(req.params.id);
       const { content, language: msgLanguage } = req.body;
@@ -344,6 +356,7 @@ export async function registerRoutes(
             description: conv.title,
             htmlContent,
             language: conv.language,
+            userId: req.user.id,
           });
 
           await storage.updateConversation(conversationId, { phase: "completed" });
@@ -365,9 +378,9 @@ export async function registerRoutes(
   });
 
   // --- Recover apps from messages that contain HTML but were never saved ---
-  app.post("/api/apps/recover", async (_req, res) => {
+  app.post("/api/apps/recover", requireAuth, async (req: any, res) => {
     try {
-      const allConvs = await storage.getAllConversations();
+      const allConvs = await storage.getAllConversations(req.user.id);
       let recovered = 0;
 
       for (const conv of allConvs) {
@@ -387,6 +400,7 @@ export async function registerRoutes(
               description: conv.title,
               htmlContent: html,
               language: conv.language,
+              userId: req.user.id,
             });
             await storage.updateConversation(conv.id, { phase: "completed" });
             recovered++;
@@ -403,33 +417,127 @@ export async function registerRoutes(
   });
 
   // --- Generated Apps ---
-  app.get("/api/apps", async (_req, res) => {
+  app.get("/api/apps", requireAuth, async (req: any, res) => {
     try {
-      const apps = await storage.getAllApps();
+      const apps = await storage.getAllApps(req.user.id);
       res.json(apps);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch apps" });
     }
   });
 
-  app.get("/api/apps/:id", async (req, res) => {
+  app.get("/api/apps/:id", requireAuth, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
       const appData = await storage.getApp(id);
       if (!appData) return res.status(404).json({ error: "App not found" });
+      if (appData.userId && appData.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
       res.json(appData);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch app" });
     }
   });
 
-  app.delete("/api/apps/:id", async (req, res) => {
+  app.delete("/api/apps/:id", requireAuth, async (req: any, res) => {
     try {
       const id = parseInt(req.params.id);
+      const appData = await storage.getApp(id);
+      if (appData && appData.userId && appData.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
       await storage.deleteApp(id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete app" });
+    }
+  });
+
+  // --- App Sharing ---
+  app.post("/api/apps/:id/share", requireAuth, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const appData = await storage.getApp(id);
+      if (!appData) return res.status(404).json({ error: "App not found" });
+      if (appData.userId && appData.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+
+      if (appData.shareId) {
+        return res.json({ shareId: appData.shareId });
+      }
+
+      const shareId = randomUUID().slice(0, 8);
+      const updated = await storage.setAppShareId(id, shareId);
+      res.json({ shareId: updated?.shareId });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to share app" });
+    }
+  });
+
+  app.delete("/api/apps/:id/share", requireAuth, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const appData = await storage.getApp(id);
+      if (!appData) return res.status(404).json({ error: "App not found" });
+      if (appData.userId && appData.userId !== req.user.id) return res.status(403).json({ error: "Forbidden" });
+
+      await storage.setAppShareId(id, "");
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to unshare app" });
+    }
+  });
+
+  app.get("/api/shared/:shareId", async (req, res) => {
+    try {
+      const appData = await storage.getAppByShareId(req.params.shareId);
+      if (!appData) return res.status(404).json({ error: "Shared app not found" });
+      res.json({ id: appData.id, title: appData.title, description: appData.description, language: appData.language });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch shared app" });
+    }
+  });
+
+  app.get("/api/shared/:shareId/serve", async (req, res) => {
+    try {
+      const appData = await storage.getAppByShareId(req.params.shareId);
+      if (!appData) return res.status(404).send("Shared app not found");
+
+      const appLang = appData.language || "en-US";
+      const appHelpersScript = `<script>
+(function(){
+  var APP_ID = ${appData.id};
+  var APP_LANG = "${appLang}";
+  var BASE = window.location.origin;
+  window.AppDB = {
+    list: function(c){return fetch(BASE+"/api/app-storage/"+APP_ID+"/"+c).then(function(r){return r.json()})},
+    get: function(c,id){return fetch(BASE+"/api/app-storage/"+APP_ID+"/"+c+"/"+id).then(function(r){return r.json()})},
+    create: function(c,d){return fetch(BASE+"/api/app-storage/"+APP_ID+"/"+c,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()})},
+    update: function(c,id,d){return fetch(BASE+"/api/app-storage/"+APP_ID+"/"+c+"/"+id,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(d)}).then(function(r){return r.json()})},
+    remove: function(c,id){return fetch(BASE+"/api/app-storage/"+APP_ID+"/"+c+"/"+id,{method:"DELETE"})},
+    clear: function(c){var url=BASE+"/api/app-storage/"+APP_ID;if(c)url+="/"+c;return fetch(url,{method:"DELETE"})}
+  };
+})();
+</script>`;
+      const htmlWithHelpers = appData.htmlContent.replace("</head>", appHelpersScript + "\n</head>");
+      res.setHeader("Content-Type", "text/html");
+      res.send(htmlWithHelpers);
+    } catch (error) {
+      res.status(500).send("Failed to serve shared app");
+    }
+  });
+
+  app.post("/api/shared/:shareId/clone", requireAuth, async (req: any, res) => {
+    try {
+      const appData = await storage.getAppByShareId(req.params.shareId);
+      if (!appData) return res.status(404).json({ error: "Shared app not found" });
+
+      const clonedApp = await storage.createApp({
+        title: appData.title + " (clone)",
+        description: appData.description,
+        htmlContent: appData.htmlContent,
+        language: appData.language,
+        userId: req.user.id,
+      });
+      res.status(201).json(clonedApp);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to clone app" });
     }
   });
 

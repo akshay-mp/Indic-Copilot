@@ -8,14 +8,21 @@ import {
 } from "@shared/schema";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import session from "express-session";
+import connectPg from "connect-pg-simple";
+import { pool } from "./db";
+
+const PostgresSessionStore = connectPg(session);
 
 export interface IStorage {
+  sessionStore: session.Store;
+
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
 
   getConversation(id: number): Promise<Conversation | undefined>;
-  getAllConversations(): Promise<Conversation[]>;
+  getAllConversations(userId?: string): Promise<Conversation[]>;
   createConversation(data: InsertConversation): Promise<Conversation>;
   updateConversation(id: number, data: Partial<InsertConversation>): Promise<Conversation | undefined>;
   deleteConversation(id: number): Promise<void>;
@@ -24,9 +31,11 @@ export interface IStorage {
   createMessage(data: InsertMessage): Promise<Message>;
 
   getApp(id: number): Promise<GeneratedApp | undefined>;
-  getAllApps(): Promise<GeneratedApp[]>;
+  getAppByShareId(shareId: string): Promise<GeneratedApp | undefined>;
+  getAllApps(userId?: string): Promise<GeneratedApp[]>;
   createApp(data: InsertGeneratedApp): Promise<GeneratedApp>;
   deleteApp(id: number): Promise<void>;
+  setAppShareId(id: number, shareId: string): Promise<GeneratedApp | undefined>;
 
   listAppStorage(appId: number, collection: string): Promise<any[]>;
   getAppStorageDoc(appId: number, collection: string, docId: string): Promise<any | undefined>;
@@ -37,6 +46,12 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  sessionStore: session.Store;
+
+  constructor() {
+    this.sessionStore = new PostgresSessionStore({ pool, createTableIfMissing: true });
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
@@ -57,7 +72,12 @@ export class DatabaseStorage implements IStorage {
     return conv;
   }
 
-  async getAllConversations(): Promise<Conversation[]> {
+  async getAllConversations(userId?: string): Promise<Conversation[]> {
+    if (userId) {
+      return db.select().from(conversations)
+        .where(eq(conversations.userId, userId))
+        .orderBy(desc(conversations.createdAt));
+    }
     return db.select().from(conversations).orderBy(desc(conversations.createdAt));
   }
 
@@ -90,7 +110,17 @@ export class DatabaseStorage implements IStorage {
     return app;
   }
 
-  async getAllApps(): Promise<GeneratedApp[]> {
+  async getAppByShareId(shareId: string): Promise<GeneratedApp | undefined> {
+    const [app] = await db.select().from(generatedApps).where(eq(generatedApps.shareId, shareId));
+    return app;
+  }
+
+  async getAllApps(userId?: string): Promise<GeneratedApp[]> {
+    if (userId) {
+      return db.select().from(generatedApps)
+        .where(eq(generatedApps.userId, userId))
+        .orderBy(desc(generatedApps.createdAt));
+    }
     return db.select().from(generatedApps).orderBy(desc(generatedApps.createdAt));
   }
 
@@ -102,6 +132,14 @@ export class DatabaseStorage implements IStorage {
   async deleteApp(id: number): Promise<void> {
     await db.delete(appStorage).where(eq(appStorage.appId, id));
     await db.delete(generatedApps).where(eq(generatedApps.id, id));
+  }
+
+  async setAppShareId(id: number, shareId: string): Promise<GeneratedApp | undefined> {
+    const [app] = await db.update(generatedApps)
+      .set({ shareId: shareId || null })
+      .where(eq(generatedApps.id, id))
+      .returning();
+    return app;
   }
 
   async listAppStorage(appId: number, collection: string): Promise<any[]> {

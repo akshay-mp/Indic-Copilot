@@ -14,8 +14,9 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Sparkles, LayoutGrid, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { Sparkles, LayoutGrid, MessageSquare, Plus, Trash2, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import type { Conversation } from "@shared/schema";
 
 interface AppSidebarProps {
@@ -24,6 +25,24 @@ interface AppSidebarProps {
   onNavigate: (page: string) => void;
   onSelectConversation: (id: number) => void;
   onNewConversation: () => void;
+}
+
+function UserFooter() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-xs text-muted-foreground truncate" data-testid="text-user-email">{user.email || user.username}</span>
+      <Button
+        size="icon"
+        variant="ghost"
+        onClick={() => logout()}
+        data-testid="button-logout"
+      >
+        <LogOut className="w-4 h-4" />
+      </Button>
+    </div>
+  );
 }
 
 export function AppSidebar({
@@ -130,7 +149,7 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-3">
+      <SidebarFooter className="p-3 space-y-2">
         <Button
           variant="outline"
           className="w-full"
@@ -140,6 +159,7 @@ export function AppSidebar({
           <Plus className="w-4 h-4 mr-2" />
           New App
         </Button>
+        <UserFooter />
       </SidebarFooter>
     </Sidebar>
   );

@@ -7,11 +7,15 @@ export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  email: text("email"),
+  name: text("name"),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
+  email: true,
+  name: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -19,6 +23,7 @@ export type User = typeof users.$inferSelect;
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   language: text("language").notNull().default("en-US"),
   phase: text("phase").notNull().default("planning"),
@@ -35,11 +40,13 @@ export const messages = pgTable("messages", {
 
 export const generatedApps = pgTable("generated_apps", {
   id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }),
   conversationId: integer("conversation_id").references(() => conversations.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   description: text("description").notNull(),
   htmlContent: text("html_content").notNull(),
   language: text("language").notNull().default("en-US"),
+  shareId: varchar("share_id").unique(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -66,6 +73,7 @@ export const insertMessageSchema = createInsertSchema(messages).omit({
 export const insertGeneratedAppSchema = createInsertSchema(generatedApps).omit({
   id: true,
   createdAt: true,
+  shareId: true,
 });
 
 export type Conversation = typeof conversations.$inferSelect;
