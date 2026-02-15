@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Send, Sparkles, Loader2 } from "lucide-react";
+import { Send, Sparkles, Loader2, Volume2, VolumeX } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { Conversation, Message } from "@shared/schema";
 
@@ -24,9 +24,13 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const [inputText, setInputText] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const autoSpeakRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
+  const wasListeningBeforeSpeakRef = useRef(false);
+  const voiceRef = useRef<any>(null);
 
   const sendMessageRef = useRef<(text: string) => void>(() => {});
 
@@ -39,11 +43,32 @@ export default function Builder({ conversationId, onConversationCreated }: Build
     sendMessageRef.current(text);
   }, []);
 
+  const startListeningRef = useRef<() => void>(() => {});
+
+  const handleSpeakEnd = useCallback(() => {
+    if (wasListeningBeforeSpeakRef.current) {
+      wasListeningBeforeSpeakRef.current = false;
+      setTimeout(() => {
+        startListeningRef.current();
+      }, 300);
+    }
+  }, []);
+
   const voice = useVoice({
     language,
     onResult: handleVoiceResult,
     onAutoSend: handleAutoSend,
+    onSpeakEnd: handleSpeakEnd,
   });
+
+  useEffect(() => {
+    startListeningRef.current = voice.startListening;
+    voiceRef.current = voice;
+  }, [voice.startListening, voice]);
+
+  useEffect(() => {
+    autoSpeakRef.current = autoSpeak;
+  }, [autoSpeak]);
 
   const { data: conversation, isLoading: loadingConversation } = useQuery<Conversation & { messages: Message[] }>({
     queryKey: ["/api/conversations", conversationId],
@@ -99,6 +124,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
       const decoder = new TextDecoder();
       let fullResponse = "";
       let buffer = "";
+      let wasAppCreated = false;
 
       if (reader) {
         while (true) {
@@ -118,6 +144,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                   setStreamingContent(fullResponse);
                 }
                 if (data.appCreated) {
+                  wasAppCreated = true;
                   queryClient.invalidateQueries({ queryKey: ["/api/apps"] });
                   toast({ title: "App created!", description: "Your app has been built. Check the dashboard to view it." });
                 }
@@ -126,6 +153,17 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                   setIsStreaming(false);
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations", activeConvId] });
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+
+                  if (autoSpeakRef.current && fullResponse && !wasAppCreated) {
+                    const speakText = fullResponse.length > 500
+                      ? fullResponse.slice(0, 500) + "..."
+                      : fullResponse;
+                    const v = voiceRef.current;
+                    if (v) {
+                      wasListeningBeforeSpeakRef.current = v.isListening;
+                      v.speak(speakText, language);
+                    }
+                  }
                 }
               } catch {}
             }
@@ -248,8 +286,18 @@ export default function Builder({ conversationId, onConversationCreated }: Build
       <div className="border-t bg-background p-4">
         <div className="max-w-3xl mx-auto">
           {allMessages.length > 0 && (
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
               <LanguageSelector value={language} onChange={setLanguage} />
+              <Button
+                size="sm"
+                variant={autoSpeak ? "default" : "outline"}
+                onClick={() => setAutoSpeak(!autoSpeak)}
+                className="gap-1"
+                data-testid="button-auto-speak"
+              >
+                {autoSpeak ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                Auto-speak {autoSpeak ? "on" : "off"}
+              </Button>
             </div>
           )}
           <div className="flex items-end gap-2">
@@ -285,9 +333,14 @@ export default function Builder({ conversationId, onConversationCreated }: Build
               )}
             </Button>
           </div>
-          {voice.isListening && (
+          {voice.isSpeaking && (
+            <p className="text-xs text-muted-foreground mt-2 animate-pulse text-center" data-testid="text-speaking-status">
+              Speaking... tap to stop
+            </p>
+          )}
+          {voice.isListening && !voice.isSpeaking && (
             <p className="text-xs text-primary mt-2 animate-pulse text-center">
-              {voice.interimTranscript || "Listening..."}
+              {voice.interimTranscript || (voice.userSpeaking ? "Hearing you..." : "Listening...")}
             </p>
           )}
         </div>

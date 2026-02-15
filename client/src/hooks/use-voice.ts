@@ -5,6 +5,7 @@ interface UseVoiceOptions {
   onResult?: (text: string) => void;
   onInterimResult?: (text: string) => void;
   onAutoSend?: (text: string) => void;
+  onSpeakEnd?: () => void;
   continuous?: boolean;
 }
 
@@ -28,6 +29,7 @@ export function useVoice({
   onResult,
   onInterimResult,
   onAutoSend,
+  onSpeakEnd,
   continuous = true,
 }: UseVoiceOptions): UseVoiceReturn {
   const [isListening, setIsListening] = useState(false);
@@ -50,13 +52,15 @@ export function useVoice({
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
   const onInterimResultRef = useRef(onInterimResult);
+  const onSpeakEndRef = useRef(onSpeakEnd);
   const languageRef = useRef(language);
 
   useEffect(() => {
     onAutoSendRef.current = onAutoSend;
     onResultRef.current = onResult;
     onInterimResultRef.current = onInterimResult;
-  }, [onAutoSend, onResult, onInterimResult]);
+    onSpeakEndRef.current = onSpeakEnd;
+  }, [onAutoSend, onResult, onInterimResult, onSpeakEnd]);
 
   useEffect(() => {
     languageRef.current = language;
@@ -298,27 +302,51 @@ export function useVoice({
 
       window.speechSynthesis.cancel();
 
+      if (vadRef.current && isActiveRef.current) {
+        try { vadRef.current.pause(); } catch {}
+      }
+      stopRecognition();
+
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = lang || language;
       utterance.rate = 0.9;
       utterance.pitch = 1;
 
       utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        if (vadRef.current && isActiveRef.current) {
+          try { vadRef.current.start(); } catch {}
+          startRecognition();
+        }
+        onSpeakEndRef.current?.();
+      };
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        if (vadRef.current && isActiveRef.current) {
+          try { vadRef.current.start(); } catch {}
+          startRecognition();
+        }
+        onSpeakEndRef.current?.();
+      };
 
       synthRef.current = utterance;
       window.speechSynthesis.speak(utterance);
     },
-    [language]
+    [language, stopRecognition, startRecognition]
   );
 
   const stopSpeaking = useCallback(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
+      if (vadRef.current && isActiveRef.current) {
+        try { vadRef.current.start(); } catch {}
+        startRecognition();
+      }
+      onSpeakEndRef.current?.();
     }
-  }, []);
+  }, [startRecognition]);
 
   useEffect(() => {
     if (isActiveRef.current && recognitionRef.current) {
