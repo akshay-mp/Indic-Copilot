@@ -440,9 +440,12 @@ export async function registerRoutes(
       const appData = await storage.getApp(id);
       if (!appData) return res.status(404).send("App not found");
 
+      const appLang = appData.language || "en-US";
+
       const appHelpersScript = `<script>
 (function(){
   var APP_ID = ${id};
+  var APP_LANG = "${appLang}";
   var BASE = '/api/app-storage/' + APP_ID;
   function _uid(){return Date.now().toString(36)+Math.random().toString(36).substr(2,9);}
   function _req(method,url,body){
@@ -476,11 +479,13 @@ export async function registerRoutes(
     });
   }
   window.AppAI = {
+    language: APP_LANG,
     chat: function(opts){
       return _req('POST','/api/app-ai/chat',{
         messages: opts.messages,
         system: opts.system||undefined,
-        appId: APP_ID
+        appId: APP_ID,
+        language: APP_LANG
       }).then(function(r){return r.content;});
     },
     ask: function(prompt, imageOrFile){
@@ -609,9 +614,24 @@ export async function registerRoutes(
   const MAX_IMAGE_BASE64_LENGTH = 10 * 1024 * 1024; // ~7.5MB decoded
   const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
+  const LANG_NAMES: Record<string, string> = {
+    "kn-IN": "Kannada", "hi-IN": "Hindi", "ta-IN": "Tamil", "te-IN": "Telugu",
+    "ml-IN": "Malayalam", "mr-IN": "Marathi", "bn-IN": "Bengali", "gu-IN": "Gujarati",
+    "pa-IN": "Punjabi", "or-IN": "Odia", "od-IN": "Odia", "en-US": "English", "en-IN": "English",
+  };
+
+  function _buildAppAISystemPrompt(language?: string): string {
+    const langCode = language || "en-US";
+    const langName = LANG_NAMES[langCode] || "English";
+    if (langName === "English") {
+      return "You are a helpful AI assistant embedded in a web application. Be concise and helpful.";
+    }
+    return `You are a helpful AI assistant embedded in a web application. Be concise and helpful. IMPORTANT: You MUST respond entirely in ${langName} (${langCode}). All your text output must be in ${langName}. Do not respond in English unless the user explicitly writes in English.`;
+  }
+
   app.post("/api/app-ai/chat", async (req, res) => {
     try {
-      const { messages, system, appId } = req.body;
+      const { messages, system, appId, language } = req.body;
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: "messages array required" });
       }
@@ -667,7 +687,7 @@ export async function registerRoutes(
       const response = await anthropic.messages.create({
         model: "claude-sonnet-4-5",
         max_tokens: 4096,
-        system: system ? String(system) : "You are a helpful AI assistant embedded in a web application. Be concise and helpful.",
+        system: system ? String(system) : _buildAppAISystemPrompt(language),
         messages: anthropicMessages,
       });
 
