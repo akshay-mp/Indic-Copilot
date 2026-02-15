@@ -805,7 +805,7 @@ export async function registerRoutes(
       });
 
       const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
+        model: "claude-3-5-sonnet-20241022",
         max_tokens: 4096,
         system: system ? String(system) : _buildAppAISystemPrompt(language),
         messages: anthropicMessages,
