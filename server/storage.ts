@@ -4,9 +4,9 @@ import {
   type Conversation, type InsertConversation,
   type Message, type InsertMessage,
   type GeneratedApp, type InsertGeneratedApp,
-  users, conversations, messages, generatedApps,
+  users, conversations, messages, generatedApps, appStorage,
 } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -27,6 +27,13 @@ export interface IStorage {
   getAllApps(): Promise<GeneratedApp[]>;
   createApp(data: InsertGeneratedApp): Promise<GeneratedApp>;
   deleteApp(id: number): Promise<void>;
+
+  listAppStorage(appId: number, collection: string): Promise<any[]>;
+  getAppStorageDoc(appId: number, collection: string, docId: string): Promise<any | undefined>;
+  createAppStorageDoc(appId: number, collection: string, docId: string, data: any): Promise<any>;
+  updateAppStorageDoc(appId: number, collection: string, docId: string, data: any): Promise<any | undefined>;
+  deleteAppStorageDoc(appId: number, collection: string, docId: string): Promise<void>;
+  clearAppStorage(appId: number, collection?: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -93,7 +100,55 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteApp(id: number): Promise<void> {
+    await db.delete(appStorage).where(eq(appStorage.appId, id));
     await db.delete(generatedApps).where(eq(generatedApps.id, id));
+  }
+
+  async listAppStorage(appId: number, collection: string): Promise<any[]> {
+    const rows = await db.select().from(appStorage)
+      .where(and(eq(appStorage.appId, appId), eq(appStorage.collection, collection)))
+      .orderBy(desc(appStorage.createdAt));
+    return rows.map(r => ({ id: r.docId, ...JSON.parse(r.data), _createdAt: r.createdAt, _updatedAt: r.updatedAt }));
+  }
+
+  async getAppStorageDoc(appId: number, collection: string, docId: string): Promise<any | undefined> {
+    const [row] = await db.select().from(appStorage)
+      .where(and(eq(appStorage.appId, appId), eq(appStorage.collection, collection), eq(appStorage.docId, docId)));
+    if (!row) return undefined;
+    return { id: row.docId, ...JSON.parse(row.data), _createdAt: row.createdAt, _updatedAt: row.updatedAt };
+  }
+
+  async createAppStorageDoc(appId: number, collection: string, docId: string, data: any): Promise<any> {
+    const [row] = await db.insert(appStorage).values({
+      appId,
+      collection,
+      docId,
+      data: JSON.stringify(data),
+    }).returning();
+    return { id: row.docId, ...data, _createdAt: row.createdAt, _updatedAt: row.updatedAt };
+  }
+
+  async updateAppStorageDoc(appId: number, collection: string, docId: string, data: any): Promise<any | undefined> {
+    const [row] = await db.update(appStorage)
+      .set({ data: JSON.stringify(data), updatedAt: sql`CURRENT_TIMESTAMP` })
+      .where(and(eq(appStorage.appId, appId), eq(appStorage.collection, collection), eq(appStorage.docId, docId)))
+      .returning();
+    if (!row) return undefined;
+    return { id: row.docId, ...data, _createdAt: row.createdAt, _updatedAt: row.updatedAt };
+  }
+
+  async deleteAppStorageDoc(appId: number, collection: string, docId: string): Promise<void> {
+    await db.delete(appStorage)
+      .where(and(eq(appStorage.appId, appId), eq(appStorage.collection, collection), eq(appStorage.docId, docId)));
+  }
+
+  async clearAppStorage(appId: number, collection?: string): Promise<void> {
+    if (collection) {
+      await db.delete(appStorage)
+        .where(and(eq(appStorage.appId, appId), eq(appStorage.collection, collection)));
+    } else {
+      await db.delete(appStorage).where(eq(appStorage.appId, appId));
+    }
   }
 }
 

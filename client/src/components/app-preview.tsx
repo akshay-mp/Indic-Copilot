@@ -20,9 +20,9 @@ export function AppPreview({ app, onClose }: AppPreviewProps) {
       </div>
       <div className="flex-1 overflow-hidden">
         <iframe
-          srcDoc={app.htmlContent}
+          src={`/api/apps/${app.id}/serve`}
           className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-modals"
+          sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
           title={app.title}
         />
       </div>

@@ -43,6 +43,16 @@ export const generatedApps = pgTable("generated_apps", {
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const appStorage = pgTable("app_storage", {
+  id: serial("id").primaryKey(),
+  appId: integer("app_id").notNull().references(() => generatedApps.id, { onDelete: "cascade" }),
+  collection: text("collection").notNull(),
+  docId: text("doc_id").notNull(),
+  data: text("data").notNull(),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertConversationSchema = createInsertSchema(conversations).omit({
   id: true,
   createdAt: true,

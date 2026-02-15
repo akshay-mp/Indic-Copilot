@@ -118,7 +118,35 @@ Generate a SINGLE, complete, self-contained HTML file that includes:
 - Use a clean, professional color scheme
 - Include realistic placeholder content
 - Make all interactive elements functional
-- Use localStorage for any data persistence
+
+DATA PERSISTENCE - CRITICAL:
+A global "AppDB" object is automatically injected into the page before your code runs. You MUST use AppDB for ALL data storage instead of localStorage. AppDB persists data to a real database.
+
+AppDB API (all methods return Promises):
+- AppDB.list("collection") → returns array of documents: [{id, ...fields, _createdAt, _updatedAt}]
+- AppDB.get("collection", "docId") → returns single document or throws 404
+- AppDB.create("collection", {field1: value1, ...}) → creates a new document with auto-generated id, returns it
+- AppDB.create("collection", {field1: value1, ...}, "customId") → creates with specific id
+- AppDB.update("collection", "docId", {field1: newValue, ...}) → updates document, returns it
+- AppDB.remove("collection", "docId") → deletes a document
+- AppDB.clear("collection") → deletes all documents in a collection
+
+Example usage:
+  // Save a customer
+  await AppDB.create("customers", { name: "John", phone: "123" });
+  // List all customers
+  var customers = await AppDB.list("customers");
+  // Update a customer
+  await AppDB.update("customers", customers[0].id, { name: "Jane", phone: "456" });
+  // Delete a customer
+  await AppDB.remove("customers", customers[0].id);
+
+IMPORTANT RULES for AppDB:
+- Always use async/await or .then() since all AppDB methods return Promises
+- Use descriptive collection names like "customers", "orders", "tasks", "products"
+- Do NOT use localStorage, sessionStorage, or any client-side storage
+- Load data from AppDB when the page loads using an async init function
+- The document "id" field is a string, not a number
 
 The HTML must be completely self-contained with NO external dependencies.
 Do NOT use any CDN links or external resources.
@@ -373,6 +401,126 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete app" });
+    }
+  });
+
+  // --- App Serve (serves HTML from real URL so fetch works in iframe) ---
+  app.get("/api/apps/:id/serve", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const appData = await storage.getApp(id);
+      if (!appData) return res.status(404).send("App not found");
+
+      const appDbScript = `<script>
+(function(){
+  var APP_ID = ${id};
+  var BASE = '/api/app-storage/' + APP_ID;
+  function _uid(){return Date.now().toString(36)+Math.random().toString(36).substr(2,9);}
+  function _req(method,url,body){
+    var opts={method:method,headers:{'Content-Type':'application/json'}};
+    if(body)opts.body=JSON.stringify(body);
+    return fetch(url,opts).then(function(r){if(!r.ok)throw new Error(r.statusText);return r.status===204?null:r.json();});
+  }
+  window.AppDB = {
+    appId: APP_ID,
+    list: function(collection){return _req('GET',BASE+'/'+encodeURIComponent(collection));},
+    get: function(collection,docId){return _req('GET',BASE+'/'+encodeURIComponent(collection)+'/'+encodeURIComponent(docId));},
+    create: function(collection,data,docId){
+      var d=docId||_uid();
+      return _req('POST',BASE+'/'+encodeURIComponent(collection),{docId:d,data:data});
+    },
+    update: function(collection,docId,data){return _req('PUT',BASE+'/'+encodeURIComponent(collection)+'/'+encodeURIComponent(docId),{data:data});},
+    remove: function(collection,docId){return _req('DELETE',BASE+'/'+encodeURIComponent(collection)+'/'+encodeURIComponent(docId));},
+    clear: function(collection){return _req('DELETE',BASE+'/'+(collection?encodeURIComponent(collection):'_all'));}
+  };
+})();
+</script>`;
+
+      let html = appData.htmlContent;
+      if (html.includes("<head>")) {
+        html = html.replace("<head>", "<head>" + appDbScript);
+      } else if (html.includes("<html")) {
+        html = html.replace(/<html[^>]*>/, "$&" + appDbScript);
+      } else {
+        html = appDbScript + html;
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (error) {
+      res.status(500).send("Failed to serve app");
+    }
+  });
+
+  // --- App Storage API ---
+  app.get("/api/app-storage/:appId/:collection", async (req, res) => {
+    try {
+      const appId = parseInt(req.params.appId);
+      const { collection } = req.params;
+      const docs = await storage.listAppStorage(appId, collection);
+      res.json(docs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to list documents" });
+    }
+  });
+
+  app.get("/api/app-storage/:appId/:collection/:docId", async (req, res) => {
+    try {
+      const appId = parseInt(req.params.appId);
+      const { collection, docId } = req.params;
+      const doc = await storage.getAppStorageDoc(appId, collection, docId);
+      if (!doc) return res.status(404).json({ error: "Document not found" });
+      res.json(doc);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get document" });
+    }
+  });
+
+  app.post("/api/app-storage/:appId/:collection", async (req, res) => {
+    try {
+      const appId = parseInt(req.params.appId);
+      const { collection } = req.params;
+      const { docId, data } = req.body;
+      if (!data) return res.status(400).json({ error: "data field required" });
+      const id = docId || (Date.now().toString(36) + Math.random().toString(36).substr(2, 9));
+      const doc = await storage.createAppStorageDoc(appId, collection, id, data);
+      res.status(201).json(doc);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to create document" });
+    }
+  });
+
+  app.put("/api/app-storage/:appId/:collection/:docId", async (req, res) => {
+    try {
+      const appId = parseInt(req.params.appId);
+      const { collection, docId } = req.params;
+      const { data } = req.body;
+      if (!data) return res.status(400).json({ error: "data field required" });
+      const existing = await storage.getAppStorageDoc(appId, collection, docId);
+      let doc;
+      if (existing) {
+        doc = await storage.updateAppStorageDoc(appId, collection, docId, data);
+      } else {
+        doc = await storage.createAppStorageDoc(appId, collection, docId, data);
+      }
+      res.json(doc);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update document" });
+    }
+  });
+
+  app.delete("/api/app-storage/:appId/:collection/:docId", async (req, res) => {
+    try {
+      const appId = parseInt(req.params.appId);
+      const { collection, docId } = req.params;
+      if (docId === "_all") {
+        await storage.clearAppStorage(appId, collection === "_all" ? undefined : collection);
+      } else {
+        await storage.deleteAppStorageDoc(appId, collection, docId);
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete document" });
     }
   });
 
