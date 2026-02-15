@@ -148,6 +148,35 @@ IMPORTANT RULES for AppDB:
 - Load data from AppDB when the page loads using an async init function
 - The document "id" field is a string, not a number
 
+AI CAPABILITIES - AppAI:
+A global "AppAI" object is also automatically injected. Use it when the app needs AI features like image analysis, text generation, classification, or Q&A.
+
+AppAI API (all methods return Promises that resolve to a string response):
+- AppAI.ask("question or prompt") → sends text to AI, returns AI response string
+- AppAI.ask("analyze this image", file) → sends text + image to AI (file can be a File/Blob from <input type="file">, a base64 string, or a data URL)
+- AppAI.analyzeImage(file, "optional prompt") → shorthand for image analysis
+- AppAI.chat({messages: [...], system: "optional system prompt"}) → full chat with message history
+  Messages format: [{role:"user", content:"text"}, {role:"assistant", content:"prev response"}, ...]
+  For images in chat: {role:"user", content:[{type:"image", data:"base64...", mediaType:"image/jpeg"}, {type:"text", text:"describe this"}]}
+
+Example - Image analysis app:
+  // Get file from input
+  var fileInput = document.getElementById('fileInput');
+  var file = fileInput.files[0];
+  // Analyze with AI
+  var result = await AppAI.ask("What plant disease is shown in this image? Provide the disease name, symptoms, and treatment.", file);
+  document.getElementById('result').textContent = result;
+
+Example - Text Q&A:
+  var answer = await AppAI.ask("What is the capital of Karnataka?");
+
+IMPORTANT RULES for AppAI:
+- Always use async/await or .then() since AppAI methods return Promises
+- Show a loading indicator while waiting for AI responses (they take a few seconds)
+- For image upload, use <input type="file" accept="image/*"> and pass the File object directly to AppAI.ask()
+- AppAI can see and analyze images (photos, screenshots, documents, etc.)
+- Handle errors with try/catch and show user-friendly error messages
+
 The HTML must be completely self-contained with NO external dependencies.
 Do NOT use any CDN links or external resources.
 
@@ -411,7 +440,7 @@ export async function registerRoutes(
       const appData = await storage.getApp(id);
       if (!appData) return res.status(404).send("App not found");
 
-      const appDbScript = `<script>
+      const appHelpersScript = `<script>
 (function(){
   var APP_ID = ${id};
   var BASE = '/api/app-storage/' + APP_ID;
@@ -433,16 +462,68 @@ export async function registerRoutes(
     remove: function(collection,docId){return _req('DELETE',BASE+'/'+encodeURIComponent(collection)+'/'+encodeURIComponent(docId));},
     clear: function(collection){return _req('DELETE',BASE+'/'+(collection?encodeURIComponent(collection):'_all'));}
   };
+  function _fileToBase64(file){
+    return new Promise(function(resolve,reject){
+      var reader=new FileReader();
+      reader.onload=function(){
+        var dataUrl=reader.result;
+        var base64=dataUrl.split(',')[1];
+        var mediaType=file.type||'image/jpeg';
+        resolve({base64:base64,mediaType:mediaType});
+      };
+      reader.onerror=reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  window.AppAI = {
+    chat: function(opts){
+      return _req('POST','/api/app-ai/chat',{
+        messages: opts.messages,
+        system: opts.system||undefined,
+        appId: APP_ID
+      }).then(function(r){return r.content;});
+    },
+    ask: function(prompt, imageOrFile){
+      if(!imageOrFile){
+        return window.AppAI.chat({messages:[{role:'user',content:prompt}]});
+      }
+      var p;
+      if(imageOrFile instanceof File || imageOrFile instanceof Blob){
+        p=_fileToBase64(imageOrFile);
+      } else if(typeof imageOrFile==='string'){
+        var mediaType='image/jpeg';
+        var b64=imageOrFile;
+        if(imageOrFile.startsWith('data:')){
+          var parts=imageOrFile.split(',');
+          b64=parts[1];
+          var mMatch=parts[0].match(/data:([^;]+)/);
+          if(mMatch)mediaType=mMatch[1];
+        }
+        p=Promise.resolve({base64:b64,mediaType:mediaType});
+      } else {
+        p=Promise.resolve(imageOrFile);
+      }
+      return p.then(function(img){
+        return window.AppAI.chat({messages:[{role:'user',content:[
+          {type:'image',data:img.base64,mediaType:img.mediaType},
+          {type:'text',text:prompt}
+        ]}]});
+      });
+    },
+    analyzeImage: function(file, prompt){
+      return window.AppAI.ask(prompt||'Analyze this image in detail.',file);
+    }
+  };
 })();
 </script>`;
 
       let html = appData.htmlContent;
       if (html.includes("<head>")) {
-        html = html.replace("<head>", "<head>" + appDbScript);
+        html = html.replace("<head>", "<head>" + appHelpersScript);
       } else if (html.includes("<html")) {
-        html = html.replace(/<html[^>]*>/, "$&" + appDbScript);
+        html = html.replace(/<html[^>]*>/, "$&" + appHelpersScript);
       } else {
-        html = appDbScript + html;
+        html = appHelpersScript + html;
       }
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -521,6 +602,90 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete document" });
+    }
+  });
+
+  // --- App AI Proxy (lets generated apps call Claude with vision) ---
+  const MAX_IMAGE_BASE64_LENGTH = 10 * 1024 * 1024; // ~7.5MB decoded
+  const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+  app.post("/api/app-ai/chat", async (req, res) => {
+    try {
+      const { messages, system, appId } = req.body;
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: "messages array required" });
+      }
+      if (messages.length > 20) {
+        return res.status(400).json({ error: "Too many messages (max 20)" });
+      }
+
+      if (appId) {
+        const appExists = await storage.getApp(parseInt(appId));
+        if (!appExists) {
+          return res.status(404).json({ error: "App not found" });
+        }
+      }
+
+      const anthropicMessages: any[] = messages.map((msg: any) => {
+        if (msg.role !== "user" && msg.role !== "assistant") {
+          return { role: "user", content: String(msg.content || "").substring(0, 10000) };
+        }
+
+        if (msg.role === "user" && Array.isArray(msg.content)) {
+          const contentParts: any[] = [];
+          for (const part of msg.content) {
+            if (part.type === "text") {
+              contentParts.push({ type: "text", text: String(part.text || "").substring(0, 10000) });
+            } else if (part.type === "image") {
+              const base64Data = String(part.data || "");
+              const mediaType = String(part.mediaType || "image/jpeg");
+              if (!ALLOWED_IMAGE_TYPES.includes(mediaType)) {
+                throw new Error("Unsupported image type: " + mediaType + ". Use JPEG, PNG, GIF, or WebP.");
+              }
+              if (base64Data.length > MAX_IMAGE_BASE64_LENGTH) {
+                throw new Error("Image too large. Maximum size is about 7.5MB.");
+              }
+              if (base64Data.length === 0) {
+                throw new Error("Empty image data");
+              }
+              contentParts.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mediaType,
+                  data: base64Data,
+                },
+              });
+            }
+          }
+          return { role: "user", content: contentParts };
+        }
+
+        return { role: msg.role, content: String(msg.content || "").substring(0, 10000) };
+      });
+
+      const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-5",
+        max_tokens: 4096,
+        system: system ? String(system) : "You are a helpful AI assistant embedded in a web application. Be concise and helpful.",
+        messages: anthropicMessages,
+      });
+
+      const textContent = response.content
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text)
+        .join("");
+
+      res.json({
+        content: textContent,
+        usage: {
+          input_tokens: response.usage.input_tokens,
+          output_tokens: response.usage.output_tokens,
+        },
+      });
+    } catch (error: any) {
+      console.error("[APP-AI] Error:", error?.message || error);
+      res.status(500).json({ error: error?.message || "AI request failed" });
     }
   });
 

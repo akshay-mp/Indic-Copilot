@@ -8,6 +8,7 @@ Voice-driven AI app builder that lets users create web applications through voic
 - Claude-powered planning phase: AI asks questions to understand app requirements
 - App generation: Claude generates complete HTML/CSS/JS apps
 - Dashboard to manage all generated apps with fullscreen preview
+- Generated apps have database persistence (AppDB) and AI capabilities (AppAI with vision)
 
 ## Architecture
 - **Frontend**: React + TypeScript + Vite + TanStack Query + Tailwind CSS + shadcn/ui
@@ -25,14 +26,28 @@ Voice-driven AI app builder that lets users create web applications through voic
 - `client/src/components/voice-button.tsx` - Mic button with VAD visual feedback (used in non-overlay contexts)
 - `server/routes.ts` - All API endpoints
 - `server/storage.ts` - Database CRUD operations
-- `shared/schema.ts` - Drizzle schema (conversations, messages, generatedApps)
+- `shared/schema.ts` - Drizzle schema (conversations, messages, generatedApps, appStorage)
 
 ## API Routes
 - `GET/POST/DELETE /api/conversations` - Conversation CRUD
 - `GET /api/conversations/:id` - Get conversation with messages
 - `POST /api/conversations/:id/messages` - Send message (SSE streaming)
 - `GET/DELETE /api/apps` - Generated apps CRUD
+- `GET /api/apps/:id/serve` - Serves app HTML with injected AppDB + AppAI helpers
+- `GET/POST/PUT/DELETE /api/app-storage/:appId/:collection[/:docId]` - Document storage for generated apps
+- `POST /api/app-ai/chat` - AI proxy for generated apps (supports text + vision/images)
 - `POST /api/tts` - Text-to-speech via Sarvam AI REST API (bulbul:v3, speaker: shubh, returns WAV audio)
+
+## Generated App Helpers (injected into served apps)
+- **AppDB**: Collection-based document storage backed by PostgreSQL
+  - Methods: list(), get(), create(), update(), remove(), clear()
+  - All methods return Promises
+- **AppAI**: AI proxy to Claude with vision support
+  - `AppAI.ask(prompt)` - text Q&A
+  - `AppAI.ask(prompt, file)` - image + text analysis (file = File/Blob/base64/dataURL)
+  - `AppAI.analyzeImage(file, prompt)` - shorthand for image analysis
+  - `AppAI.chat({messages, system})` - full chat with history
+  - Supports Claude vision for image analysis (plant disease detection, document OCR, etc.)
 
 ## Conversation Flow
 1. Planning phase: Claude asks clarifying questions about the app
