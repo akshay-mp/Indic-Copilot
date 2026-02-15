@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import Anthropic from "@anthropic-ai/sdk";
-import WebSocket from "ws";
+
 
 const anthropic = new Anthropic({
   apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
@@ -301,14 +301,11 @@ export async function registerRoutes(
   });
 
   // --- Sarvam TTS ---
-  function getSarvamLangCode(browserLang: string): string | null {
-    const map: Record<string, string> = {
-      "kn-IN": "kn-IN", "hi-IN": "hi-IN", "ta-IN": "ta-IN", "te-IN": "te-IN",
-      "ml-IN": "ml-IN", "mr-IN": "mr-IN", "bn-IN": "bn-IN", "gu-IN": "gu-IN",
-      "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN",
-    };
-    return map[browserLang] || null;
-  }
+  const sarvamLangMap: Record<string, string> = {
+    "kn-IN": "kn-IN", "hi-IN": "hi-IN", "ta-IN": "ta-IN", "te-IN": "te-IN",
+    "ml-IN": "ml-IN", "mr-IN": "mr-IN", "bn-IN": "bn-IN", "gu-IN": "gu-IN",
+    "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN",
+  };
 
   app.post("/api/tts", async (req, res) => {
     const apiKey = process.env.SARVAM_API_KEY;
@@ -319,99 +316,38 @@ export async function registerRoutes(
     const { text, language } = req.body;
     if (!text) return res.status(400).json({ error: "Text required" });
 
-    const targetLang = getSarvamLangCode(language || "en-US");
+    const targetLang = sarvamLangMap[language || "en-US"];
     if (!targetLang) {
       return res.status(400).json({ error: "Language not supported by Sarvam TTS" });
     }
 
     try {
-      const audioChunks: Buffer[] = [];
+      const { SarvamAIClient } = await import("sarvamai");
+      const client = new SarvamAIClient({ apiSubscriptionKey: apiKey });
 
-      await new Promise<void>((resolve, reject) => {
-        const wsUrl = `wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v2&send_completion_event=true`;
-        const ws = new WebSocket(wsUrl, {
-          headers: { "Api-Subscription-Key": apiKey },
-        });
+      const ttsText = text.substring(0, 1500);
 
-        const timeout = setTimeout(() => {
-          ws.close();
-          reject(new Error("TTS timeout"));
-        }, 30000);
-
-        ws.on("open", () => {
-          const config = {
-            type: "config",
-            data: {
-              target_language_code: targetLang,
-              speaker: "meera",
-            },
-          };
-          console.log("Sarvam WS sending config:", JSON.stringify(config));
-          ws.send(JSON.stringify(config));
-
-          setTimeout(() => {
-            const chunks = text.match(/.{1,300}/g) || [text];
-            for (const chunk of chunks) {
-              const textMsg = { type: "text", data: { text: chunk } };
-              console.log("Sarvam WS sending text:", JSON.stringify(textMsg).substring(0, 100));
-              ws.send(JSON.stringify(textMsg));
-            }
-            ws.send(JSON.stringify({ type: "flush" }));
-          }, 200);
-        });
-
-        ws.on("message", (rawData: WebSocket.Data) => {
-          const str = rawData.toString();
-          console.log("Sarvam WS message:", str.substring(0, 200));
-          try {
-            const msg = JSON.parse(str);
-            if (msg.type === "audio" && msg.data?.audio) {
-              audioChunks.push(Buffer.from(msg.data.audio, "base64"));
-            } else if (msg.type === "event") {
-              clearTimeout(timeout);
-              ws.close();
-              resolve();
-            } else if (msg.type === "error") {
-              clearTimeout(timeout);
-              ws.close();
-              const errMsg = msg.data?.message || "Sarvam TTS error";
-              console.error("Sarvam TTS WS error:", errMsg);
-              reject(new Error(errMsg));
-            } else {
-              console.log("Sarvam WS unknown message type:", msg.type);
-            }
-          } catch {
-            if (Buffer.isBuffer(rawData)) {
-              audioChunks.push(rawData);
-            }
-          }
-        });
-
-        ws.on("error", (err) => {
-          clearTimeout(timeout);
-          reject(err);
-        });
-
-        ws.on("close", () => {
-          clearTimeout(timeout);
-          if (audioChunks.length > 0) {
-            resolve();
-          } else {
-            reject(new Error("WebSocket closed without audio"));
-          }
-        });
+      const response = await client.textToSpeech.convert({
+        text: ttsText,
+        target_language_code: targetLang as any,
+        speaker: "meera" as any,
+        model: "bulbul:v2" as any,
+        audio_format: "mp3" as any,
+        sample_rate: 22050,
+        pace: 1.0,
       });
 
-      if (audioChunks.length === 0) {
+      const audioBase64 = response.audios?.[0];
+      if (!audioBase64) {
         return res.status(500).json({ error: "No audio generated" });
       }
 
-      const fullAudio = Buffer.concat(audioChunks);
+      const audioBuffer = Buffer.from(audioBase64, "base64");
       res.set({
         "Content-Type": "audio/mpeg",
-        "Content-Length": fullAudio.length.toString(),
+        "Content-Length": audioBuffer.length.toString(),
       });
-      res.send(fullAudio);
+      res.send(audioBuffer);
     } catch (error: any) {
       console.error("Sarvam TTS error:", error.message || error);
       res.status(500).json({ error: "TTS failed: " + (error.message || "Unknown error") });
