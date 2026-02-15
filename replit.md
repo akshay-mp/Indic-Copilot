@@ -22,8 +22,8 @@ Voice-driven AI app builder that lets users create web applications through voic
 - `client/src/pages/plant-doctor.tsx` - Plant disease identifier
 - `client/src/components/` - Reusable UI components
 - `client/src/hooks/use-voice.ts` - Voice hook (Silero VAD + Web Speech API)
-- `client/src/components/voice-overlay.tsx` - Full-screen Perplexity-style voice mode overlay
-- `client/src/components/particle-sphere.tsx` - Canvas-based animated particle sphere (reacts to voice states)
+- `client/src/components/voice-overlay.tsx` - Voice mode side panel (right side, chat stays visible on left)
+- `client/src/components/particle-sphere.tsx` - Canvas-based animated atom visualization (orbiting electrons, reacts to voice states)
 - `client/src/components/voice-button.tsx` - Mic button with VAD visual feedback (used in non-overlay contexts)
 - `server/routes.ts` - All API endpoints
 - `server/storage.ts` - Database CRUD operations
@@ -47,7 +47,7 @@ Voice-driven AI app builder that lets users create web applications through voic
 - **STT**: Browser Web Speech API (SpeechRecognition) - supports 20+ Indian languages via Chrome
 - **TTS**: Browser SpeechSynthesis API
 - **Flow**: Click mic → VAD + STT start → Silero detects speech start/end → auto-send after silence → Claude responds
-- **Voice Mode**: Full-screen Perplexity-style overlay with animated particle sphere, auto-starts listening, continuous voice loop
+- **Voice Mode**: Side panel (340px right) with animated atom visualization, chat stays visible on left, auto-starts listening, continuous voice loop
 - **Auto-speak**: Claude automatically reads responses aloud (truncated to 500 chars), resumes mic after TTS ends
 - **Assets**: ONNX model + worklet + WASM files in client/public/
 

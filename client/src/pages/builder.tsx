@@ -200,8 +200,8 @@ export default function Builder({ conversationId, onConversationCreated }: Build
       : []),
   ];
 
-  return (
-    <div className="flex flex-col h-full" data-testid="builder-page">
+  const chatPanel = (
+    <div className="flex flex-col h-full min-w-0 flex-1">
       <div className="flex-1 overflow-y-auto">
         {allMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-6 text-center">
@@ -289,8 +289,8 @@ export default function Builder({ conversationId, onConversationCreated }: Build
           <div className="flex items-end gap-2">
             <Button
               size="icon"
-              variant={voice.isListening ? "default" : "outline"}
-              onClick={() => setVoiceMode(true)}
+              variant={voiceMode ? "default" : "outline"}
+              onClick={() => setVoiceMode(!voiceMode)}
               disabled={!voice.isSupported}
               data-testid="button-open-voice"
             >
@@ -321,24 +321,33 @@ export default function Builder({ conversationId, onConversationCreated }: Build
           </div>
         </div>
       </div>
+    </div>
+  );
 
-      <VoiceOverlay
-        isOpen={voiceMode}
-        onClose={() => setVoiceMode(false)}
-        isListening={voice.isListening}
-        isSpeaking={voice.isSpeaking}
-        isSupported={voice.isSupported}
-        userSpeaking={voice.userSpeaking}
-        audioLevel={voice.audioLevel}
-        vadReady={voice.vadReady}
-        interimTranscript={voice.interimTranscript}
-        isStreaming={isStreaming}
-        onStartListening={voice.startListening}
-        onStopListening={voice.stopListening}
-        onStopSpeaking={voice.stopSpeaking}
-        language={language}
-        onLanguageChange={setLanguage}
-      />
+  return (
+    <div className="flex h-full" data-testid="builder-page">
+      {chatPanel}
+      {voiceMode && (
+        <div className="w-[340px] shrink-0 hidden md:flex">
+          <VoiceOverlay
+            isOpen={voiceMode}
+            onClose={() => setVoiceMode(false)}
+            isListening={voice.isListening}
+            isSpeaking={voice.isSpeaking}
+            isSupported={voice.isSupported}
+            userSpeaking={voice.userSpeaking}
+            audioLevel={voice.audioLevel}
+            vadReady={voice.vadReady}
+            interimTranscript={voice.interimTranscript}
+            isStreaming={isStreaming}
+            onStartListening={voice.startListening}
+            onStopListening={voice.stopListening}
+            onStopSpeaking={voice.stopSpeaking}
+            language={language}
+            onLanguageChange={setLanguage}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -106,33 +106,29 @@ export function VoiceOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-background"
+      className="flex flex-col items-center justify-between h-full w-full border-l bg-background"
       data-testid="voice-overlay"
     >
-      <div className="flex items-center justify-between w-full p-4">
-        <div className="w-10" />
+      <div className="flex items-center justify-end w-full p-3">
         <LanguageSelector
           value={language}
           onChange={onLanguageChange}
         />
-        <div className="w-10" />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-8">
-        <div className="relative">
-          <ParticleSphere
-            state={sphereState}
-            audioLevel={audioLevel}
-            size={280}
-            isDark={isDark}
-          />
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-6">
+        <ParticleSphere
+          state={sphereState}
+          audioLevel={audioLevel}
+          size={220}
+          isDark={isDark}
+        />
 
         <p
           className={cn(
-            "text-lg font-light tracking-wide transition-colors duration-300 max-w-xs text-center px-4",
+            "text-base font-light tracking-wide transition-colors duration-300 max-w-[220px] text-center px-4",
             statusColor,
-            (userSpeaking || (isListening && interimTranscript)) && "text-base"
+            (userSpeaking || (isListening && interimTranscript)) && "text-sm"
           )}
           data-testid="text-voice-status"
         >
@@ -140,18 +136,18 @@ export function VoiceOverlay({
         </p>
       </div>
 
-      <div className="flex items-center gap-6 pb-12">
+      <div className="flex items-center gap-5 pb-8">
         <button
           onClick={handleClose}
           className={cn(
-            "w-14 h-14 rounded-full border flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "w-12 h-12 rounded-full border flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             isDark
               ? "border-gray-700 text-gray-400 bg-gray-900/50"
               : "border-gray-300 text-gray-500 bg-gray-100/80"
           )}
           data-testid="button-voice-close"
         >
-          <X className="w-6 h-6" />
+          <X className="w-5 h-5" />
         </button>
 
         <button
@@ -166,7 +162,7 @@ export function VoiceOverlay({
           }}
           disabled={!isSupported}
           className={cn(
-            "w-14 h-14 rounded-full border flex items-center justify-center transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "w-12 h-12 rounded-full border flex items-center justify-center transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             isListening && !isSpeaking
               ? isDark
                 ? "border-teal-500/50 text-teal-400 bg-teal-500/10"
@@ -186,9 +182,9 @@ export function VoiceOverlay({
           data-testid="button-voice-mic"
         >
           {isListening ? (
-            <MicOff className="w-6 h-6" />
+            <MicOff className="w-5 h-5" />
           ) : (
-            <Mic className="w-6 h-6" />
+            <Mic className="w-5 h-5" />
           )}
         </button>
       </div>
