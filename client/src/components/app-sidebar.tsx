@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import {
@@ -40,8 +41,11 @@ export function AppSidebar({
     mutationFn: async (id: number) => {
       await apiRequest("DELETE", `/api/conversations/${id}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      if (activeConversationId === deletedId) {
+        onNewConversation();
+      }
     },
   });
 
@@ -94,15 +98,27 @@ export function AppSidebar({
               {conversations && conversations.length > 0 ? (
                 conversations.map((conv) => (
                   <SidebarMenuItem key={conv.id}>
-                    <SidebarMenuButton
-                      onClick={() => onSelectConversation(conv.id)}
-                      isActive={activePage === "builder" && activeConversationId === conv.id}
-                      className="group/item"
-                      data-testid={`nav-conversation-${conv.id}`}
-                    >
-                      <MessageSquare className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{conv.title}</span>
-                    </SidebarMenuButton>
+                    <div className="flex items-center group/item w-full">
+                      <SidebarMenuButton
+                        onClick={() => onSelectConversation(conv.id)}
+                        isActive={activePage === "builder" && activeConversationId === conv.id}
+                        className="flex-1 min-w-0"
+                        data-testid={`nav-conversation-${conv.id}`}
+                      >
+                        <MessageSquare className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{conv.title}</span>
+                      </SidebarMenuButton>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteMutation.mutate(conv.id);
+                        }}
+                        className="invisible group-hover/item:visible shrink-0 p-1 rounded-md text-muted-foreground hover:text-destructive transition-colors mr-1"
+                        data-testid={`button-delete-conversation-${conv.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </SidebarMenuItem>
                 ))
               ) : (
