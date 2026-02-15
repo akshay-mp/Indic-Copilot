@@ -304,7 +304,7 @@ export async function registerRoutes(
   const sarvamLangMap: Record<string, string> = {
     "kn-IN": "kn-IN", "hi-IN": "hi-IN", "ta-IN": "ta-IN", "te-IN": "te-IN",
     "ml-IN": "ml-IN", "mr-IN": "mr-IN", "bn-IN": "bn-IN", "gu-IN": "gu-IN",
-    "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN",
+    "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN", "od-IN": "od-IN",
   };
 
   app.post("/api/tts", async (req, res) => {
@@ -322,29 +322,37 @@ export async function registerRoutes(
     }
 
     try {
-      const { SarvamAIClient } = await import("sarvamai");
-      const client = new SarvamAIClient({ apiSubscriptionKey: apiKey });
-
       const ttsText = text.substring(0, 1500);
 
-      const response = await client.textToSpeech.convert({
-        text: ttsText,
-        target_language_code: targetLang as any,
-        speaker: "anushka" as any,
-        model: "bulbul:v2" as any,
-        audio_format: "mp3" as any,
-        sample_rate: 22050,
-        pace: 1.0,
+      const sarvamRes = await fetch("https://api.sarvam.ai/text-to-speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-subscription-key": apiKey,
+        },
+        body: JSON.stringify({
+          text: ttsText,
+          target_language_code: targetLang,
+          speaker: "shubh",
+          model: "bulbul:v3",
+        }),
       });
 
-      const audioBase64 = response.audios?.[0];
+      if (!sarvamRes.ok) {
+        const errBody = await sarvamRes.text();
+        console.error("Sarvam TTS API error:", errBody);
+        return res.status(sarvamRes.status).json({ error: "TTS failed: " + errBody });
+      }
+
+      const data = await sarvamRes.json() as { audios?: string[] };
+      const audioBase64 = data.audios?.[0];
       if (!audioBase64) {
         return res.status(500).json({ error: "No audio generated" });
       }
 
       const audioBuffer = Buffer.from(audioBase64, "base64");
       res.set({
-        "Content-Type": "audio/mpeg",
+        "Content-Type": "audio/wav",
         "Content-Length": audioBuffer.length.toString(),
       });
       res.send(audioBuffer);

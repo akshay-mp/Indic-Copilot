@@ -35,7 +35,7 @@ Voice-driven AI app builder that lets users create web applications through voic
 - `POST /api/conversations/:id/messages` - Send message (SSE streaming)
 - `GET/DELETE /api/apps` - Generated apps CRUD
 - `POST /api/plant-analyze` - Plant disease analysis (accepts base64 image)
-- `POST /api/tts` - Text-to-speech via Sarvam AI (accepts text + language, returns MP3 audio)
+- `POST /api/tts` - Text-to-speech via Sarvam AI REST API (bulbul:v3, speaker: shubh, returns WAV audio)
 
 ## Conversation Flow
 1. Planning phase: Claude asks clarifying questions about the app
@@ -47,10 +47,11 @@ Voice-driven AI app builder that lets users create web applications through voic
 - **VAD**: Silero VAD v5 running in browser via ONNX Runtime Web (@ricky0123/vad-web)
 - **STT**: Browser Web Speech API (SpeechRecognition) - supports 20+ Indian languages via Chrome
 - **TTS**: Sarvam AI (primary, via backend proxy) → Browser SpeechSynthesis (fallback)
-  - Sarvam TTS: WebSocket streaming API, supports all Indian languages (kn, hi, ta, te, ml, mr, bn, gu, pa, en-IN)
-  - Backend endpoint `/api/tts` proxies requests to Sarvam, returns MP3 audio
+  - Sarvam TTS: REST API (bulbul:v3 model, speaker: shubh), supports 11 Indian languages (kn, hi, ta, te, ml, mr, bn, gu, pa, od, en-IN)
+  - Backend endpoint `/api/tts` calls Sarvam REST API directly (not SDK), returns WAV audio
   - Frontend plays audio via HTMLAudioElement, falls back to browser SpeechSynthesis if Sarvam unavailable
   - Requires SARVAM_API_KEY secret
+  - Note: bulbul:v3 speakers differ from v2. Valid v3 speakers: shubh, aditya, ritu, ashutosh, priya, neha, rahul, etc.
 - **Flow**: Click mic → VAD + STT start → Silero detects speech start/end → auto-send after silence → Claude responds
 - **Voice Mode**: Side panel (340px right) with animated atom visualization, chat stays visible on left, auto-starts listening, continuous voice loop
 - **Auto-speak**: Claude automatically reads responses aloud (truncated to 500 chars), resumes mic after TTS ends
