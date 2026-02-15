@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import Anthropic from "@anthropic-ai/sdk";
+import WebSocket from "ws";
 
 const anthropic = new Anthropic({
   apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
@@ -296,6 +297,113 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Plant analysis error:", error);
       res.status(500).json({ error: "Failed to analyze plant image" });
+    }
+  });
+
+  // --- Sarvam TTS ---
+  function getSarvamLangCode(browserLang: string): string | null {
+    const map: Record<string, string> = {
+      "kn-IN": "kn-IN", "hi-IN": "hi-IN", "ta-IN": "ta-IN", "te-IN": "te-IN",
+      "ml-IN": "ml-IN", "mr-IN": "mr-IN", "bn-IN": "bn-IN", "gu-IN": "gu-IN",
+      "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN",
+    };
+    return map[browserLang] || null;
+  }
+
+  app.post("/api/tts", async (req, res) => {
+    const apiKey = process.env.SARVAM_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "Sarvam API key not configured" });
+    }
+
+    const { text, language } = req.body;
+    if (!text) return res.status(400).json({ error: "Text required" });
+
+    const targetLang = getSarvamLangCode(language || "en-US");
+    if (!targetLang) {
+      return res.status(400).json({ error: "Language not supported by Sarvam TTS" });
+    }
+
+    try {
+      const audioChunks: Buffer[] = [];
+
+      await new Promise<void>((resolve, reject) => {
+        const wsUrl = `wss://api.sarvam.ai/text-to-speech/ws`;
+        const ws = new WebSocket(wsUrl, {
+          headers: { "Api-Subscription-Key": apiKey },
+        });
+
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new Error("TTS timeout"));
+        }, 30000);
+
+        ws.on("open", () => {
+          ws.send(JSON.stringify({
+            type: "config",
+            data: {
+              target_language_code: targetLang,
+              speaker: "meera",
+              model: "bulbul:v2",
+              output_audio_codec: "mp3",
+              sample_rate: 22050,
+              pace: 1.0,
+            },
+          }));
+
+          const chunks = text.match(/.{1,300}/g) || [text];
+          for (const chunk of chunks) {
+            ws.send(JSON.stringify({ type: "text", data: { text: chunk } }));
+          }
+          ws.send(JSON.stringify({ type: "flush" }));
+          ws.send(JSON.stringify({ type: "end" }));
+        });
+
+        ws.on("message", (data: WebSocket.Data) => {
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === "audio" && msg.data?.audio) {
+              audioChunks.push(Buffer.from(msg.data.audio, "base64"));
+            } else if (msg.type === "completion") {
+              clearTimeout(timeout);
+              ws.close();
+              resolve();
+            } else if (msg.type === "error") {
+              clearTimeout(timeout);
+              ws.close();
+              reject(new Error(msg.data?.message || "Sarvam TTS error"));
+            }
+          } catch {}
+        });
+
+        ws.on("error", (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+
+        ws.on("close", () => {
+          clearTimeout(timeout);
+          if (audioChunks.length > 0) {
+            resolve();
+          } else {
+            reject(new Error("WebSocket closed without audio"));
+          }
+        });
+      });
+
+      if (audioChunks.length === 0) {
+        return res.status(500).json({ error: "No audio generated" });
+      }
+
+      const fullAudio = Buffer.concat(audioChunks);
+      res.set({
+        "Content-Type": "audio/mpeg",
+        "Content-Length": fullAudio.length.toString(),
+      });
+      res.send(fullAudio);
+    } catch (error: any) {
+      console.error("Sarvam TTS error:", error.message || error);
+      res.status(500).json({ error: "TTS failed: " + (error.message || "Unknown error") });
     }
   });
 

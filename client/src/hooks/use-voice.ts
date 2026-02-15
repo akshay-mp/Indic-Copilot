@@ -368,36 +368,90 @@ export function useVoice({
     return null;
   }, []);
 
-  const doSpeak = useCallback((text: string, targetLang: string) => {
+  const prepareForSpeaking = useCallback(() => {
     if (vadRef.current && isActiveRef.current) {
       try { vadRef.current.pause(); } catch {}
     }
     stopRecognition();
     clearTimers();
+  }, [stopRecognition, clearTimers]);
 
-    let resumed = false;
-    const resumeListening = () => {
-      if (resumed) return;
-      resumed = true;
-      setIsSpeaking(false);
-      if (vadRef.current && isActiveRef.current) {
-        try { vadRef.current.start(); } catch {}
-        startRecognitionRef.current();
-      } else if (isActiveRef.current) {
-        startRecognitionRef.current();
-      }
-      onSpeakEndRef.current?.();
-    };
+  const resumeAfterSpeaking = useCallback(() => {
+    setIsSpeaking(false);
+    if (vadRef.current && isActiveRef.current) {
+      try { vadRef.current.start(); } catch {}
+      startRecognitionRef.current();
+    } else if (isActiveRef.current) {
+      startRecognitionRef.current();
+    }
+    onSpeakEndRef.current?.();
+  }, []);
 
-    const minSpeakDurationMs = 1500;
-    const resumeAfterDelay = (startTime: number) => {
-      const elapsed = Date.now() - startTime;
-      if (elapsed < minSpeakDurationMs) {
-        setTimeout(resumeListening, minSpeakDurationMs - elapsed);
-      } else {
-        resumeListening();
+  const sarvamAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const speakWithSarvam = useCallback(async (text: string, targetLang: string): Promise<boolean> => {
+    try {
+      console.log("Sarvam TTS: requesting audio for lang:", targetLang);
+      const controller = new AbortController();
+      const clientTimeout = setTimeout(() => controller.abort(), 15000);
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language: targetLang }),
+        signal: controller.signal,
+      });
+      clearTimeout(clientTimeout);
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        console.warn("Sarvam TTS failed:", err.error || response.status);
+        return false;
       }
-    };
+
+      const audioBlob = await response.blob();
+      if (audioBlob.size === 0) {
+        console.warn("Sarvam TTS: empty audio response");
+        return false;
+      }
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      sarvamAudioRef.current = audio;
+
+      return new Promise<boolean>((resolve) => {
+        audio.onplay = () => {
+          console.log("Sarvam TTS: playing audio");
+        };
+        audio.onended = () => {
+          console.log("Sarvam TTS: playback finished");
+          URL.revokeObjectURL(audioUrl);
+          sarvamAudioRef.current = null;
+          resolve(true);
+        };
+        audio.onerror = (e) => {
+          console.warn("Sarvam TTS: audio playback error", e);
+          URL.revokeObjectURL(audioUrl);
+          sarvamAudioRef.current = null;
+          resolve(false);
+        };
+        audio.play().catch((e) => {
+          console.warn("Sarvam TTS: play() failed", e);
+          URL.revokeObjectURL(audioUrl);
+          sarvamAudioRef.current = null;
+          resolve(false);
+        });
+      });
+    } catch (e) {
+      console.warn("Sarvam TTS: network error", e);
+      return false;
+    }
+  }, []);
+
+  const speakWithBrowser = useCallback((text: string, targetLang: string, onDone: () => void) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      setTimeout(onDone, 2000);
+      return;
+    }
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = targetLang;
@@ -407,86 +461,68 @@ export function useVoice({
     const voice = findVoice(targetLang);
     if (voice) {
       utterance.voice = voice;
-      console.log("TTS using voice:", voice.name, "for lang:", targetLang);
-    } else {
-      console.log("TTS no voice found for:", targetLang, "- will try with lang tag only");
+      console.log("Browser TTS using voice:", voice.name, "for lang:", targetLang);
     }
 
     const speakStartTime = Date.now();
 
-    utterance.onstart = () => {
-      console.log("TTS started speaking in", targetLang);
-      setIsSpeaking(true);
-    };
     utterance.onend = () => {
       const duration = Date.now() - speakStartTime;
-      console.log("TTS finished speaking, duration:", duration, "ms");
       if (duration < 200) {
-        console.warn("TTS completed too quickly (", duration, "ms) - voice likely unavailable for", targetLang);
-        setIsSpeaking(false);
-        setTimeout(resumeListening, 3000);
+        console.warn("Browser TTS completed instantly - no voice for", targetLang);
+        setTimeout(onDone, 3000);
       } else {
-        resumeAfterDelay(speakStartTime);
+        onDone();
       }
     };
-    utterance.onerror = (e) => {
-      console.warn("TTS error:", e.error, "for lang:", targetLang);
-      setIsSpeaking(false);
-      setTimeout(resumeListening, 2000);
+    utterance.onerror = () => {
+      setTimeout(onDone, 2000);
     };
 
     synthRef.current = utterance;
-    setIsSpeaking(true);
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
 
     setTimeout(() => {
-      if (!resumed && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-        console.warn("TTS safety timeout — resuming listening for", targetLang);
-        resumeListening();
+      if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+        setTimeout(onDone, 3000);
       }
-    }, 30000);
-  }, [findVoice, stopRecognition, clearTimers]);
+    }, 500);
+  }, [findVoice]);
 
   const speak = useCallback(
-    (text: string, lang?: string) => {
-      if (typeof window === "undefined" || !window.speechSynthesis) return;
-
-      window.speechSynthesis.cancel();
-
+    async (text: string, lang?: string) => {
       const targetLang = lang || language;
       console.log("TTS speak called with lang:", targetLang, "text length:", text.length);
 
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) {
-        const handler = () => {
-          window.speechSynthesis.removeEventListener("voiceschanged", handler);
-          doSpeak(text, targetLang);
-        };
-        window.speechSynthesis.addEventListener("voiceschanged", handler);
-        setTimeout(() => {
-          window.speechSynthesis.removeEventListener("voiceschanged", handler);
-          doSpeak(text, targetLang);
-        }, 1000);
-      } else {
-        doSpeak(text, targetLang);
+      prepareForSpeaking();
+      setIsSpeaking(true);
+
+      const sarvamSuccess = await speakWithSarvam(text, targetLang);
+
+      if (sarvamSuccess) {
+        resumeAfterSpeaking();
+        return;
       }
+
+      console.log("Falling back to browser TTS for:", targetLang);
+      speakWithBrowser(text, targetLang, () => {
+        resumeAfterSpeaking();
+      });
     },
-    [language, doSpeak]
+    [language, prepareForSpeaking, speakWithSarvam, speakWithBrowser, resumeAfterSpeaking]
   );
 
   const stopSpeaking = useCallback(() => {
+    if (sarvamAudioRef.current) {
+      sarvamAudioRef.current.pause();
+      sarvamAudioRef.current = null;
+    }
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      if (vadRef.current && isActiveRef.current) {
-        try { vadRef.current.start(); } catch {}
-        startRecognitionRef.current();
-      } else if (isActiveRef.current) {
-        startRecognitionRef.current();
-      }
-      onSpeakEndRef.current?.();
     }
-  }, []);
+    resumeAfterSpeaking();
+  }, [resumeAfterSpeaking]);
 
   useEffect(() => {
     if (isActiveRef.current && recognitionRef.current) {
@@ -516,6 +552,10 @@ export function useVoice({
       }
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
+      }
+      if (sarvamAudioRef.current) {
+        sarvamAudioRef.current.pause();
+        sarvamAudioRef.current = null;
       }
     };
   }, [clearTimers, stopRecognition]);
