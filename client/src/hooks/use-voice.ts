@@ -49,7 +49,7 @@ export function useVoice({
   const speechEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const vadLoadedRef = useRef(false);
+  const startRecognitionRef = useRef<() => void>(() => {});
 
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
@@ -71,9 +71,7 @@ export function useVoice({
   useEffect(() => {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.getVoices();
-      const handler = () => {
-        window.speechSynthesis.getVoices();
-      };
+      const handler = () => { window.speechSynthesis.getVoices(); };
       window.speechSynthesis.addEventListener("voiceschanged", handler);
       return () => window.speechSynthesis.removeEventListener("voiceschanged", handler);
     }
@@ -107,7 +105,7 @@ export function useVoice({
     }
   }, []);
 
-  const doAutoSend = useCallback(() => {
+  const doAutoSend = useCallback((restartAfter: boolean) => {
     const finalText = accumulatedTextRef.current.trim();
     if (finalText && hasSpeechRef.current) {
       accumulatedTextRef.current = "";
@@ -122,6 +120,14 @@ export function useVoice({
       if (onAutoSendRef.current) {
         onAutoSendRef.current(finalText);
       }
+
+      if (restartAfter && isActiveRef.current) {
+        setTimeout(() => {
+          if (isActiveRef.current) {
+            startRecognitionRef.current();
+          }
+        }, 500);
+      }
     }
   }, [stopRecognition]);
 
@@ -134,7 +140,7 @@ export function useVoice({
       silenceTimerRef.current = setTimeout(() => {
         silenceTimerRef.current = null;
         if (isActiveRef.current && hasSpeechRef.current) {
-          doAutoSend();
+          doAutoSend(true);
         }
       }, 1500);
     }
@@ -218,6 +224,8 @@ export function useVoice({
     }
   }, [isSupported, stopRecognition, resetSilenceTimer]);
 
+  startRecognitionRef.current = startRecognition;
+
   const handleSpeechEnd = useCallback(() => {
     if (speechEndTimerRef.current) {
       clearTimeout(speechEndTimerRef.current);
@@ -227,18 +235,10 @@ export function useVoice({
       speechEndTimerRef.current = null;
 
       if (isActiveRef.current && hasSpeechRef.current) {
-        doAutoSend();
-
-        if (continuous) {
-          setTimeout(() => {
-            if (isActiveRef.current) {
-              startRecognition();
-            }
-          }, 300);
-        }
+        doAutoSend(continuous);
       }
     }, 800);
-  }, [continuous, doAutoSend, startRecognition]);
+  }, [continuous, doAutoSend]);
 
   const stopListening = useCallback(() => {
     isActiveRef.current = false;
@@ -273,7 +273,6 @@ export function useVoice({
     isActiveRef.current = true;
     accumulatedTextRef.current = "";
     hasSpeechRef.current = false;
-    vadLoadedRef.current = false;
     setTranscript("");
     setInterimTranscript("");
     setIsListening(true);
@@ -283,7 +282,7 @@ export function useVoice({
       const { MicVAD } = await import("@ricky0123/vad-web");
 
       const vad = await MicVAD.new({
-        model: "v5",
+        model: "v5" as any,
         baseAssetPath: "/",
         onnxWASMBasePath: "/",
         positiveSpeechThreshold: 0.5,
@@ -321,7 +320,6 @@ export function useVoice({
 
       vadRef.current = vad;
       vad.start();
-      vadLoadedRef.current = true;
       setVadReady(true);
 
       startRecognition();
@@ -335,7 +333,6 @@ export function useVoice({
       }, 200);
     } catch (err) {
       console.warn("Silero VAD not available, using fallback silence detection:", err);
-      vadLoadedRef.current = false;
 
       if (!isActiveRef.current) return;
 
@@ -382,9 +379,9 @@ export function useVoice({
       setIsSpeaking(false);
       if (vadRef.current && isActiveRef.current) {
         try { vadRef.current.start(); } catch {}
-        startRecognition();
+        startRecognitionRef.current();
       } else if (isActiveRef.current) {
-        startRecognition();
+        startRecognitionRef.current();
       }
       onSpeakEndRef.current?.();
     };
@@ -397,12 +394,21 @@ export function useVoice({
     const voice = findVoice(targetLang);
     if (voice) {
       utterance.voice = voice;
+      console.log("TTS using voice:", voice.name, "for lang:", targetLang);
+    } else {
+      console.log("TTS no voice found for:", targetLang, "- using default");
     }
 
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = resumeListening;
+    utterance.onstart = () => {
+      console.log("TTS started speaking in", targetLang);
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      console.log("TTS finished speaking");
+      resumeListening();
+    };
     utterance.onerror = (e) => {
-      console.warn("TTS error:", e.error);
+      console.warn("TTS error:", e.error, "for lang:", targetLang);
       resumeListening();
     };
 
@@ -411,11 +417,11 @@ export function useVoice({
 
     setTimeout(() => {
       if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-        console.warn("TTS did not start, no voice available for", targetLang);
+        console.warn("TTS did not start — no voice available for", targetLang);
         resumeListening();
       }
     }, 500);
-  }, [findVoice, stopRecognition, startRecognition, clearTimers]);
+  }, [findVoice, stopRecognition, clearTimers]);
 
   const speak = useCallback(
     (text: string, lang?: string) => {
@@ -424,6 +430,7 @@ export function useVoice({
       window.speechSynthesis.cancel();
 
       const targetLang = lang || language;
+      console.log("TTS speak called with lang:", targetLang, "text length:", text.length);
 
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) {
@@ -449,13 +456,13 @@ export function useVoice({
       setIsSpeaking(false);
       if (vadRef.current && isActiveRef.current) {
         try { vadRef.current.start(); } catch {}
-        startRecognition();
+        startRecognitionRef.current();
       } else if (isActiveRef.current) {
-        startRecognition();
+        startRecognitionRef.current();
       }
       onSpeakEndRef.current?.();
     }
-  }, [startRecognition]);
+  }, []);
 
   useEffect(() => {
     if (isActiveRef.current && recognitionRef.current) {

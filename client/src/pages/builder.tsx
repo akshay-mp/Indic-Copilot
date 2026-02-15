@@ -24,6 +24,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const [inputText, setInputText] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [pendingSend, setPendingSend] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceMode, setVoiceMode] = useState(false);
   const autoSpeakRef = useRef(true);
@@ -84,6 +85,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isStreaming) return;
+    setPendingSend(true);
 
     let activeConvId = conversationId;
 
@@ -143,6 +145,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                 if (data.content) {
                   fullResponse += data.content;
                   setStreamingContent(fullResponse);
+                  setPendingSend(false);
                 }
                 if (data.appCreated) {
                   wasAppCreated = true;
@@ -174,6 +177,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
     } catch (error) {
       toast({ title: "Error", description: "Failed to send message. Please try again.", variant: "destructive" });
       setIsStreaming(false);
+      setPendingSend(false);
       setStreamingContent("");
     }
   }, [conversationId, language, isStreaming, onConversationCreated, toast]);
@@ -340,6 +344,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
             vadReady={voice.vadReady}
             interimTranscript={voice.interimTranscript}
             isStreaming={isStreaming}
+            pendingSend={pendingSend}
             onStartListening={voice.startListening}
             onStopListening={voice.stopListening}
             onStopSpeaking={voice.stopSpeaking}

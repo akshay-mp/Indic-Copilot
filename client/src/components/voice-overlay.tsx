@@ -16,6 +16,7 @@ interface VoiceOverlayProps {
   vadReady: boolean;
   interimTranscript: string;
   isStreaming: boolean;
+  pendingSend?: boolean;
   onStartListening: () => void;
   onStopListening: () => void;
   onStopSpeaking: () => void;
@@ -34,6 +35,7 @@ export function VoiceOverlay({
   vadReady,
   interimTranscript,
   isStreaming,
+  pendingSend = false,
   onStartListening,
   onStopListening,
   onStopSpeaking,
@@ -81,13 +83,14 @@ export function VoiceOverlay({
   if (!isOpen) return null;
 
   let sphereState: "idle" | "listening" | "userSpeaking" | "thinking" | "speaking" = "idle";
-  if (isStreaming) sphereState = "thinking";
+  if (isStreaming || pendingSend) sphereState = "thinking";
   else if (isSpeaking) sphereState = "speaking";
   else if (userSpeaking) sphereState = "userSpeaking";
   else if (isListening) sphereState = "listening";
 
   let statusText = "Tap mic to start";
   if (isStreaming) statusText = "Thinking...";
+  else if (pendingSend) statusText = "Sending...";
   else if (isSpeaking) statusText = "Speaking...";
   else if (userSpeaking) statusText = interimTranscript || "Listening...";
   else if (isListening && interimTranscript) statusText = interimTranscript;
@@ -96,7 +99,7 @@ export function VoiceOverlay({
 
   const statusColor = isSpeaking
     ? isDark ? "text-purple-400" : "text-purple-600"
-    : isStreaming
+    : (isStreaming || pendingSend)
     ? isDark ? "text-blue-400" : "text-blue-600"
     : userSpeaking
     ? isDark ? "text-emerald-400" : "text-emerald-600"
