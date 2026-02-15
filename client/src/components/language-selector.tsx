@@ -13,19 +13,26 @@ import { LANGUAGES } from "@/lib/languages";
 interface LanguageSelectorProps {
   value: string;
   onChange: (value: string) => void;
+  dark?: boolean;
 }
 
-export function LanguageSelector({ value, onChange }: LanguageSelectorProps) {
+export function LanguageSelector({ value, onChange, dark }: LanguageSelectorProps) {
   const indianLanguages = LANGUAGES.filter((l) => l.region === "India");
   const otherLanguages = LANGUAGES.filter((l) => l.region !== "India");
 
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
-        className="w-[200px]"
+        className={dark
+          ? "w-[200px] border-gray-700 bg-gray-900/50 text-gray-300"
+          : "w-[200px]"
+        }
         data-testid="select-language"
       >
-        <Globe className="w-4 h-4 mr-2 shrink-0 text-muted-foreground" />
+        <Globe className={dark
+          ? "w-4 h-4 mr-2 shrink-0 text-gray-500"
+          : "w-4 h-4 mr-2 shrink-0 text-muted-foreground"
+        } />
         <SelectValue placeholder="Select language" />
       </SelectTrigger>
       <SelectContent>

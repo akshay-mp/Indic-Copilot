@@ -3,14 +3,14 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useVoice } from "@/hooks/use-voice";
 import { LanguageSelector } from "@/components/language-selector";
-import { VoiceButton } from "@/components/voice-button";
 import { ChatMessage } from "@/components/chat-message";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Send, Sparkles, Loader2, Volume2, VolumeX } from "lucide-react";
+import { Send, Sparkles, Loader2, Volume2, VolumeX, Mic } from "lucide-react";
+import { VoiceOverlay } from "@/components/voice-overlay";
 import { useToast } from "@/hooks/use-toast";
 import type { Conversation, Message } from "@shared/schema";
 
@@ -25,6 +25,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const [streamingContent, setStreamingContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const [voiceMode, setVoiceMode] = useState(false);
   const autoSpeakRef = useRef(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -214,31 +215,16 @@ export default function Builder({ conversationId, onConversationCreated }: Build
             </p>
             <div className="flex flex-col items-center gap-4">
               <LanguageSelector value={language} onChange={setLanguage} />
-              <VoiceButton
-                isListening={voice.isListening}
-                isSpeaking={voice.isSpeaking}
-                isSupported={voice.isSupported}
-                onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
-                onStopSpeaking={voice.stopSpeaking}
-                audioLevel={voice.audioLevel}
-                userSpeaking={voice.userSpeaking}
+              <Button
                 size="lg"
-              />
-              {voice.isListening && (
-                <p className="text-sm text-primary animate-pulse" data-testid="text-listening">
-                  {voice.interimTranscript || inputText || (voice.vadReady ? "Listening... speak now" : "Initializing voice detection...")}
-                </p>
-              )}
-              {voice.isListening && voice.userSpeaking && (
-                <p className="text-xs text-muted-foreground" data-testid="text-vad-status">
-                  Speaking detected - will auto-send when you pause
-                </p>
-              )}
-              {voice.isListening && !voice.userSpeaking && inputText && (
-                <p className="text-xs text-muted-foreground" data-testid="text-vad-status">
-                  Auto-sending shortly...
-                </p>
-              )}
+                onClick={() => setVoiceMode(true)}
+                disabled={!voice.isSupported}
+                className="gap-2 rounded-full px-8"
+                data-testid="button-start-voice"
+              >
+                <Mic className="w-5 h-5" />
+                Start Voice Mode
+              </Button>
               {!voice.isSupported && (
                 <p className="text-xs text-muted-foreground">
                   Voice input not supported in this browser. Use text instead.
@@ -301,15 +287,15 @@ export default function Builder({ conversationId, onConversationCreated }: Build
             </div>
           )}
           <div className="flex items-end gap-2">
-            <VoiceButton
-              isListening={voice.isListening}
-              isSpeaking={voice.isSpeaking}
-              isSupported={voice.isSupported}
-              onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
-              onStopSpeaking={voice.stopSpeaking}
-              audioLevel={voice.audioLevel}
-              userSpeaking={voice.userSpeaking}
-            />
+            <Button
+              size="icon"
+              variant={voice.isListening ? "default" : "outline"}
+              onClick={() => setVoiceMode(true)}
+              disabled={!voice.isSupported}
+              data-testid="button-open-voice"
+            >
+              <Mic className="w-5 h-5" />
+            </Button>
             <Textarea
               ref={textareaRef}
               value={inputText}
@@ -333,18 +319,26 @@ export default function Builder({ conversationId, onConversationCreated }: Build
               )}
             </Button>
           </div>
-          {voice.isSpeaking && (
-            <p className="text-xs text-muted-foreground mt-2 animate-pulse text-center" data-testid="text-speaking-status">
-              Speaking... tap to stop
-            </p>
-          )}
-          {voice.isListening && !voice.isSpeaking && (
-            <p className="text-xs text-primary mt-2 animate-pulse text-center">
-              {voice.interimTranscript || (voice.userSpeaking ? "Hearing you..." : "Listening...")}
-            </p>
-          )}
         </div>
       </div>
+
+      <VoiceOverlay
+        isOpen={voiceMode}
+        onClose={() => setVoiceMode(false)}
+        isListening={voice.isListening}
+        isSpeaking={voice.isSpeaking}
+        isSupported={voice.isSupported}
+        userSpeaking={voice.userSpeaking}
+        audioLevel={voice.audioLevel}
+        vadReady={voice.vadReady}
+        interimTranscript={voice.interimTranscript}
+        isStreaming={isStreaming}
+        onStartListening={voice.startListening}
+        onStopListening={voice.stopListening}
+        onStopSpeaking={voice.stopSpeaking}
+        language={language}
+        onLanguageChange={setLanguage}
+      />
     </div>
   );
 }
