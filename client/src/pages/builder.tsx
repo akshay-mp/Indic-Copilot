@@ -28,6 +28,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceMode, setVoiceMode] = useState(false);
   const autoSpeakRef = useRef(true);
+  const voiceModeRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
@@ -71,6 +72,10 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   useEffect(() => {
     autoSpeakRef.current = autoSpeak;
   }, [autoSpeak]);
+
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
 
   const { data: conversation, isLoading: loadingConversation } = useQuery<Conversation & { messages: Message[] }>({
     queryKey: ["/api/conversations", conversationId],
@@ -164,7 +169,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                       : fullResponse;
                     const v = voiceRef.current;
                     if (v) {
-                      wasListeningBeforeSpeakRef.current = v.isListening;
+                      wasListeningBeforeSpeakRef.current = v.isListening || voiceModeRef.current;
                       v.speak(speakText, language);
                     }
                   }
