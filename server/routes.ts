@@ -330,7 +330,7 @@ export async function registerRoutes(
       const response = await client.textToSpeech.convert({
         text: ttsText,
         target_language_code: targetLang as any,
-        speaker: "meera" as any,
+        speaker: "anushka" as any,
         model: "bulbul:v2" as any,
         audio_format: "mp3" as any,
         sample_rate: 22050,
