@@ -293,6 +293,28 @@ export function useVoice({
     }
   }, []);
 
+  const languageRef = useRef(language);
+  useEffect(() => {
+    if (languageRef.current !== language && isActiveRef.current) {
+      languageRef.current = language;
+      isActiveRef.current = false;
+      clearSilenceTimer();
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch {}
+        recognitionRef.current = null;
+      }
+      accumulatedTextRef.current = "";
+      hasSpeechRef.current = false;
+      cleanupAudio();
+      setIsListening(false);
+      setInterimTranscript("");
+      setTimeout(() => {
+        startListening();
+      }, 200);
+    }
+    languageRef.current = language;
+  }, [language, clearSilenceTimer, cleanupAudio, startListening]);
+
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
