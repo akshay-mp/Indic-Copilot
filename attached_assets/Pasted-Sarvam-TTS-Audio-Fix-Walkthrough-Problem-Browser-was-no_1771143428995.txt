@@ -1,0 +1,120 @@
+Sarvam TTS Audio Fix — Walkthrough
+Problem
+Browser was not playing audio received from Sarvam TTS API.
+
+Root Cause
+The Sarvam API returns MP3/MPEG by default when no codec is specified, but the server was sending it as Content-Type: audio/wav. The browser's decodeAudioData() failed on this format mismatch.
+
+Changes Made
+routes.ts
+Added output_audio_codec: "wav" to the API request so Sarvam returns actual WAV audio:
+
+1
+1
+import type { Express } from "express";
+2
+2
+import { createServer, type Server } from "http";
+3
+3
+import { storage } from "./storage";
+⋯ Expand 331 more lines
+335
+335
+          target_language_code: targetLang,
+336
+336
+          speaker: "shubh",
+337
+337
+          model: "bulbul:v3",
+338
+          output_audio_codec: "wav",
+338
+339
+        }),
+339
+340
+      });
+340
+341
+⋯ Expand 23 more lines
+364
+365
+365
+366
+  return httpServer;
+366
+367
+}
+use-voice.ts
+Added response content-type and byte-length logging for debugging
+Added explicit await ctx.resume() before attempting audio decode
+1
+1
+import { useState, useCallback, useRef, useEffect } from "react";
+2
+2
+3
+3
+interface UseVoiceOptions {
+⋯ Expand 434 more lines
+438
+438
+        return false;
+439
+439
+      }
+440
+440
+441
+      const contentType = response.headers.get("content-type") || "unknown";
+441
+442
+      const arrayBuffer = await response.arrayBuffer();
+442
+443
+      if (arrayBuffer.byteLength === 0) {
+443
+444
+        console.warn("Sarvam TTS: empty audio response");
+444
+445
+        return false;
+445
+446
+      }
+447
+      console.log("Sarvam TTS: received", arrayBuffer.byteLength, "bytes, content-type:", contentType);
+446
+448
+447
+449
+      const ctx = getAudioContext();
+450
+      if (ctx.state === "suspended") {
+451
+        await ctx.resume();
+452
+      }
+448
+453
+      try {
+449
+454
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+450
+455
+        return new Promise<boolean>((resolve) => {
+⋯ Expand 183 more lines
+634
+639
+    userSpeaking,
+635
+640
+  };
+636
+641
+}
+Verification
+Run npm run dev, select an Indian language, send a message, and confirm TTS audio plays. Check console for "Sarvam TTS: playing audio via Web Audio API".
