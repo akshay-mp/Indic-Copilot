@@ -8,6 +8,7 @@ interface VoiceButtonProps {
   isSupported: boolean;
   onToggleListening: () => void;
   onStopSpeaking: () => void;
+  audioLevel?: number;
   size?: "default" | "lg";
 }
 
@@ -17,6 +18,7 @@ export function VoiceButton({
   isSupported,
   onToggleListening,
   onStopSpeaking,
+  audioLevel = 0,
   size = "default",
 }: VoiceButtonProps) {
   if (isSpeaking) {
@@ -37,6 +39,8 @@ export function VoiceButton({
     );
   }
 
+  const ringScale = isListening ? 1 + audioLevel * 0.6 : 1;
+
   return (
     <Button
       size="icon"
@@ -56,9 +60,10 @@ export function VoiceButton({
         <Mic className={cn("w-5 h-5", size === "lg" && "w-6 h-6")} />
       )}
       {isListening && (
-        <>
-          <span className="absolute inset-0 rounded-md animate-ping bg-primary/20" style={{ animationDuration: "1.5s" }} />
-        </>
+        <span
+          className="absolute inset-0 rounded-md bg-primary/20 transition-transform duration-100"
+          style={{ transform: `scale(${ringScale})` }}
+        />
       )}
     </Button>
   );

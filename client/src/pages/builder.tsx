@@ -28,13 +28,23 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
+  const sendMessageRef = useRef<(text: string) => void>(() => {});
+
   const handleVoiceResult = useCallback((text: string) => {
-    setInputText((prev) => (prev ? prev + " " + text : text));
+    setInputText(text);
+  }, []);
+
+  const handleAutoSend = useCallback((text: string) => {
+    setInputText("");
+    sendMessageRef.current(text);
   }, []);
 
   const voice = useVoice({
     language,
     onResult: handleVoiceResult,
+    onAutoSend: handleAutoSend,
+    vadEnabled: true,
+    silenceTimeout: 1800,
   });
 
   const { data: conversation, isLoading: loadingConversation } = useQuery<Conversation & { messages: Message[] }>({
@@ -131,6 +141,10 @@ export default function Builder({ conversationId, onConversationCreated }: Build
     }
   }, [conversationId, language, isStreaming, onConversationCreated, toast]);
 
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
   const handleSubmit = () => {
     sendMessage(inputText);
   };
@@ -170,16 +184,17 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                 isSupported={voice.isSupported}
                 onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
                 onStopSpeaking={voice.stopSpeaking}
+                audioLevel={voice.audioLevel}
                 size="lg"
               />
               {voice.isListening && (
                 <p className="text-sm text-primary animate-pulse" data-testid="text-listening">
-                  Listening...
+                  {voice.interimTranscript || inputText || "Listening... speak now"}
                 </p>
               )}
-              {voice.interimTranscript && (
-                <p className="text-sm text-muted-foreground italic max-w-sm" data-testid="text-interim">
-                  {voice.interimTranscript}
+              {voice.isListening && inputText && (
+                <p className="text-xs text-muted-foreground" data-testid="text-vad-status">
+                  Will auto-send when you stop speaking
                 </p>
               )}
               {!voice.isSupported && (
@@ -240,6 +255,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
               isSupported={voice.isSupported}
               onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
               onStopSpeaking={voice.stopSpeaking}
+              audioLevel={voice.audioLevel}
             />
             <Textarea
               ref={textareaRef}
