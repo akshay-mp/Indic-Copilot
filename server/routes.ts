@@ -759,10 +759,14 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Too many messages (max 20)" });
       }
 
+      // Verify app exists if appId provided
       if (appId) {
-        const appExists = await storage.getApp(parseInt(appId));
-        if (!appExists) {
-          return res.status(404).json({ error: "App not found" });
+        const id = parseInt(String(appId));
+        if (!isNaN(id)) {
+          const appExists = await storage.getApp(id);
+          if (!appExists) {
+            console.warn(`App AI proxy: App ${id} not found`);
+          }
         }
       }
 
