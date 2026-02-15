@@ -68,6 +68,17 @@ export function useVoice({
     languageRef.current = language;
   }, [language]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      const handler = () => {
+        window.speechSynthesis.getVoices();
+      };
+      window.speechSynthesis.addEventListener("voiceschanged", handler);
+      return () => window.speechSynthesis.removeEventListener("voiceschanged", handler);
+    }
+  }, []);
+
   const isSupported =
     typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
@@ -341,49 +352,95 @@ export function useVoice({
     }
   }, [isSupported, startRecognition, handleSpeechEnd]);
 
+  const findVoice = useCallback((targetLang: string): SpeechSynthesisVoice | null => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return null;
+    const voices = window.speechSynthesis.getVoices();
+    const langPrefix = targetLang.split("-")[0].toLowerCase();
+
+    let exact = voices.find(v => v.lang.toLowerCase() === targetLang.toLowerCase());
+    if (exact) return exact;
+
+    let prefixMatch = voices.find(v => v.lang.toLowerCase().startsWith(langPrefix));
+    if (prefixMatch) return prefixMatch;
+
+    let googleMatch = voices.find(v =>
+      v.name.toLowerCase().includes("google") && v.lang.toLowerCase().startsWith(langPrefix)
+    );
+    if (googleMatch) return googleMatch;
+
+    return null;
+  }, []);
+
+  const doSpeak = useCallback((text: string, targetLang: string) => {
+    if (vadRef.current && isActiveRef.current) {
+      try { vadRef.current.pause(); } catch {}
+    }
+    stopRecognition();
+    clearTimers();
+
+    const resumeListening = () => {
+      setIsSpeaking(false);
+      if (vadRef.current && isActiveRef.current) {
+        try { vadRef.current.start(); } catch {}
+        startRecognition();
+      } else if (isActiveRef.current) {
+        startRecognition();
+      }
+      onSpeakEndRef.current?.();
+    };
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = targetLang;
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+
+    const voice = findVoice(targetLang);
+    if (voice) {
+      utterance.voice = voice;
+    }
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = resumeListening;
+    utterance.onerror = (e) => {
+      console.warn("TTS error:", e.error);
+      resumeListening();
+    };
+
+    synthRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+
+    setTimeout(() => {
+      if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+        console.warn("TTS did not start, no voice available for", targetLang);
+        resumeListening();
+      }
+    }, 500);
+  }, [findVoice, stopRecognition, startRecognition, clearTimers]);
+
   const speak = useCallback(
     (text: string, lang?: string) => {
       if (typeof window === "undefined" || !window.speechSynthesis) return;
 
       window.speechSynthesis.cancel();
 
-      if (vadRef.current && isActiveRef.current) {
-        try { vadRef.current.pause(); } catch {}
+      const targetLang = lang || language;
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) {
+        const handler = () => {
+          window.speechSynthesis.removeEventListener("voiceschanged", handler);
+          doSpeak(text, targetLang);
+        };
+        window.speechSynthesis.addEventListener("voiceschanged", handler);
+        setTimeout(() => {
+          window.speechSynthesis.removeEventListener("voiceschanged", handler);
+          doSpeak(text, targetLang);
+        }, 1000);
+      } else {
+        doSpeak(text, targetLang);
       }
-      stopRecognition();
-      clearTimers();
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = lang || language;
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        if (vadRef.current && isActiveRef.current) {
-          try { vadRef.current.start(); } catch {}
-          startRecognition();
-        } else if (isActiveRef.current) {
-          startRecognition();
-        }
-        onSpeakEndRef.current?.();
-      };
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        if (vadRef.current && isActiveRef.current) {
-          try { vadRef.current.start(); } catch {}
-          startRecognition();
-        } else if (isActiveRef.current) {
-          startRecognition();
-        }
-        onSpeakEndRef.current?.();
-      };
-
-      synthRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
     },
-    [language, stopRecognition, startRecognition, clearTimers]
+    [language, doSpeak]
   );
 
   const stopSpeaking = useCallback(() => {
