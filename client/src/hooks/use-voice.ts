@@ -375,7 +375,10 @@ export function useVoice({
     stopRecognition();
     clearTimers();
 
+    let resumed = false;
     const resumeListening = () => {
+      if (resumed) return;
+      resumed = true;
       setIsSpeaking(false);
       if (vadRef.current && isActiveRef.current) {
         try { vadRef.current.start(); } catch {}
@@ -384,6 +387,16 @@ export function useVoice({
         startRecognitionRef.current();
       }
       onSpeakEndRef.current?.();
+    };
+
+    const minSpeakDurationMs = 1500;
+    const resumeAfterDelay = (startTime: number) => {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < minSpeakDurationMs) {
+        setTimeout(resumeListening, minSpeakDurationMs - elapsed);
+      } else {
+        resumeListening();
+      }
     };
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -396,31 +409,42 @@ export function useVoice({
       utterance.voice = voice;
       console.log("TTS using voice:", voice.name, "for lang:", targetLang);
     } else {
-      console.log("TTS no voice found for:", targetLang, "- using default");
+      console.log("TTS no voice found for:", targetLang, "- will try with lang tag only");
     }
+
+    const speakStartTime = Date.now();
 
     utterance.onstart = () => {
       console.log("TTS started speaking in", targetLang);
       setIsSpeaking(true);
     };
     utterance.onend = () => {
-      console.log("TTS finished speaking");
-      resumeListening();
+      const duration = Date.now() - speakStartTime;
+      console.log("TTS finished speaking, duration:", duration, "ms");
+      if (duration < 200) {
+        console.warn("TTS completed too quickly (", duration, "ms) - voice likely unavailable for", targetLang);
+        setIsSpeaking(false);
+        setTimeout(resumeListening, 3000);
+      } else {
+        resumeAfterDelay(speakStartTime);
+      }
     };
     utterance.onerror = (e) => {
       console.warn("TTS error:", e.error, "for lang:", targetLang);
-      resumeListening();
+      setIsSpeaking(false);
+      setTimeout(resumeListening, 2000);
     };
 
     synthRef.current = utterance;
+    setIsSpeaking(true);
     window.speechSynthesis.speak(utterance);
 
     setTimeout(() => {
-      if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
-        console.warn("TTS did not start — no voice available for", targetLang);
+      if (!resumed && !window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+        console.warn("TTS safety timeout — resuming listening for", targetLang);
         resumeListening();
       }
-    }, 500);
+    }, 30000);
   }, [findVoice, stopRecognition, clearTimers]);
 
   const speak = useCallback(
