@@ -29,8 +29,8 @@ Your role during the PLANNING phase:
 5. When presenting the plan, format it clearly with sections for: App Name, Description, Key Features, and Pages/Screens
 6. End your plan summary with: "Would you like me to build this app? Say 'yes' or 'approve' to start building!"
 
-IMPORTANT: Respond in ${lang}. The user speaks ${lang}, so communicate naturally in that language.
-Keep responses concise and conversational - this is a voice-first interface.`;
+CRITICAL LANGUAGE RULE: You MUST respond ENTIRELY in ${lang}. Every single word of your response must be in ${lang}. The user has selected ${lang} as their language. Do NOT use English unless ${lang} is English. This is non-negotiable.
+Keep responses concise and conversational - this is a voice-first interface designed for speaking aloud.`;
 
 const SYSTEM_PROMPT_BUILD = (lang: string) => `You are VoiceForge, an AI app builder. The user has approved the app plan. Now generate the complete app.
 
@@ -49,7 +49,7 @@ Do NOT use any CDN links or external resources.
 
 Return ONLY the HTML code, nothing else. No explanations, no markdown code blocks, just raw HTML.
 
-The app should be in ${lang} language for all user-facing text.`;
+CRITICAL: All user-facing text, labels, buttons, headings, placeholder content, and descriptions in the generated app MUST be in ${lang}. Do not use English text unless ${lang} is English.`;
 
 const SYSTEM_PROMPT_PLANT = (lang: string) => `You are a plant disease expert. Analyze the plant image provided and give a detailed diagnosis.
 
@@ -120,7 +120,7 @@ export async function registerRoutes(
   app.post("/api/conversations/:id/messages", async (req, res) => {
     try {
       const conversationId = parseInt(req.params.id);
-      const { content } = req.body;
+      const { content, language: msgLanguage } = req.body;
       const conv = await storage.getConversation(conversationId);
       if (!conv) return res.status(404).json({ error: "Conversation not found" });
 
@@ -128,10 +128,16 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Message content is required" });
       }
 
+      const activeLanguage = msgLanguage || conv.language || "en-US";
+
+      if (msgLanguage && msgLanguage !== conv.language) {
+        await storage.updateConversation(conversationId, { language: msgLanguage });
+      }
+
       await storage.createMessage({ conversationId, role: "user", content: content.trim() });
 
       const existingMessages = await storage.getMessagesByConversation(conversationId);
-      const langName = getLanguageName(conv.language);
+      const langName = getLanguageName(activeLanguage);
 
       const isApproval = /\b(yes|approve|build|go ahead|haan|hā|hoon|ಹೌದು|oo|சரி|అవును|ശരി|हो|হ্যাঁ|હા|ਹਾਂ)\b/i.test(content);
       const assistantMessages = existingMessages.filter(m => m.role === "assistant");

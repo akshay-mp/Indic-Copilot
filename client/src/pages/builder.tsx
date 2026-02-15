@@ -116,7 +116,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
       const response = await fetch(`/api/conversations/${activeConvId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify({ content: text, language }),
       });
 
       if (!response.ok) throw new Error("Failed to send message");
