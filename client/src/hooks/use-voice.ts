@@ -388,6 +388,36 @@ export function useVoice({
   }, []);
 
   const sarvamAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const speakingGuardRef = useRef(false);
+
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch(() => {});
+    }
+    return audioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      const ctx = getAudioContext();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      const silent = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+      silent.volume = 0;
+      silent.play().then(() => silent.pause()).catch(() => {});
+    };
+    document.addEventListener("click", unlockAudio, { once: false });
+    document.addEventListener("touchstart", unlockAudio, { once: false });
+    return () => {
+      document.removeEventListener("click", unlockAudio);
+      document.removeEventListener("touchstart", unlockAudio);
+    };
+  }, [getAudioContext]);
 
   const speakWithSarvam = useCallback(async (text: string, targetLang: string): Promise<boolean> => {
     try {
@@ -408,44 +438,59 @@ export function useVoice({
         return false;
       }
 
-      const audioBlob = await response.blob();
-      if (audioBlob.size === 0) {
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
         console.warn("Sarvam TTS: empty audio response");
         return false;
       }
 
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      sarvamAudioRef.current = audio;
-
-      return new Promise<boolean>((resolve) => {
-        audio.onplay = () => {
-          console.log("Sarvam TTS: playing audio");
-        };
-        audio.onended = () => {
-          console.log("Sarvam TTS: playback finished");
-          URL.revokeObjectURL(audioUrl);
-          sarvamAudioRef.current = null;
-          resolve(true);
-        };
-        audio.onerror = (e) => {
-          console.warn("Sarvam TTS: audio playback error", e);
-          URL.revokeObjectURL(audioUrl);
-          sarvamAudioRef.current = null;
-          resolve(false);
-        };
-        audio.play().catch((e) => {
-          console.warn("Sarvam TTS: play() failed", e);
-          URL.revokeObjectURL(audioUrl);
-          sarvamAudioRef.current = null;
-          resolve(false);
+      const ctx = getAudioContext();
+      try {
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        return new Promise<boolean>((resolve) => {
+          const source = ctx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(ctx.destination);
+          source.onended = () => {
+            console.log("Sarvam TTS: playback finished via Web Audio API");
+            resolve(true);
+          };
+          source.start(0);
+          console.log("Sarvam TTS: playing audio via Web Audio API, duration:", audioBuffer.duration.toFixed(1), "s");
+          sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch {} } } as any;
         });
-      });
+      } catch (decodeErr) {
+        console.warn("Sarvam TTS: Web Audio decode failed, trying HTMLAudioElement", decodeErr);
+        const audioBlob = new Blob([arrayBuffer], { type: "audio/wav" });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        sarvamAudioRef.current = audio;
+
+        return new Promise<boolean>((resolve) => {
+          audio.onended = () => {
+            console.log("Sarvam TTS: playback finished via HTMLAudioElement");
+            URL.revokeObjectURL(audioUrl);
+            sarvamAudioRef.current = null;
+            resolve(true);
+          };
+          audio.onerror = () => {
+            URL.revokeObjectURL(audioUrl);
+            sarvamAudioRef.current = null;
+            resolve(false);
+          };
+          audio.play().catch((e) => {
+            console.warn("Sarvam TTS: HTMLAudioElement play() also failed", e);
+            URL.revokeObjectURL(audioUrl);
+            sarvamAudioRef.current = null;
+            resolve(false);
+          });
+        });
+      }
     } catch (e) {
       console.warn("Sarvam TTS: network error", e);
       return false;
     }
-  }, []);
+  }, [getAudioContext]);
 
   const speakWithBrowser = useCallback((text: string, targetLang: string, onDone: () => void) => {
     if (typeof window === "undefined" || !window.speechSynthesis) {
@@ -492,6 +537,12 @@ export function useVoice({
 
   const speak = useCallback(
     async (text: string, lang?: string) => {
+      if (speakingGuardRef.current) {
+        console.log("TTS speak: already speaking, ignoring duplicate call");
+        return;
+      }
+      speakingGuardRef.current = true;
+
       const targetLang = lang || language;
       console.log("TTS speak called with lang:", targetLang, "text length:", text.length);
 
@@ -501,12 +552,14 @@ export function useVoice({
       const sarvamSuccess = await speakWithSarvam(text, targetLang);
 
       if (sarvamSuccess) {
+        speakingGuardRef.current = false;
         resumeAfterSpeaking();
         return;
       }
 
       console.log("Falling back to browser TTS for:", targetLang);
       speakWithBrowser(text, targetLang, () => {
+        speakingGuardRef.current = false;
         resumeAfterSpeaking();
       });
     },
@@ -514,6 +567,7 @@ export function useVoice({
   );
 
   const stopSpeaking = useCallback(() => {
+    speakingGuardRef.current = false;
     if (sarvamAudioRef.current) {
       sarvamAudioRef.current.pause();
       sarvamAudioRef.current = null;
@@ -556,6 +610,11 @@ export function useVoice({
       if (sarvamAudioRef.current) {
         sarvamAudioRef.current.pause();
         sarvamAudioRef.current = null;
+      }
+      speakingGuardRef.current = false;
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
       }
     };
   }, [clearTimers, stopRecognition]);
