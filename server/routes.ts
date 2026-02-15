@@ -127,19 +127,6 @@ CRITICAL: All user-facing text, labels, buttons, headings, placeholder content, 
 
 Remember: Output ONLY the raw HTML starting with <!DOCTYPE html>. Nothing else.`;
 
-const SYSTEM_PROMPT_PLANT = (lang: string) => `You are a plant disease expert. Analyze the plant image provided and give a detailed diagnosis.
-
-Provide your analysis in ${lang} with these sections:
-1. Plant Identification - What plant/crop this appears to be
-2. Health Assessment - Overall health status
-3. Disease/Issue Identified - Name of disease or problem if any
-4. Symptoms Observed - What visual symptoms you see
-5. Causes - Likely causes of the condition
-6. Treatment Recommendations - How to treat/manage the issue
-7. Prevention Tips - How to prevent this in the future
-
-Be specific and practical. If the plant appears healthy, say so and provide general care tips.
-If you cannot identify the plant clearly, mention that and provide your best assessment.`;
 
 export async function registerRoutes(
   httpServer: Server,
@@ -386,50 +373,6 @@ export async function registerRoutes(
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Failed to delete app" });
-    }
-  });
-
-  // --- Plant Disease Analysis ---
-  app.post("/api/plant-analyze", async (req, res) => {
-    try {
-      const { image, language } = req.body;
-      if (!image) return res.status(400).json({ error: "Image required" });
-
-      const langName = getLanguageName(language || "en-US");
-
-      const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
-      const mediaType = image.match(/^data:(image\/\w+);base64,/)?.[1] || "image/jpeg";
-
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
-        max_tokens: 8192,
-        system: SYSTEM_PROMPT_PLANT(langName),
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "image",
-                source: {
-                  type: "base64",
-                  media_type: mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-                  data: base64Data,
-                },
-              },
-              {
-                type: "text",
-                text: "Please analyze this plant image for any diseases or health issues.",
-              },
-            ],
-          },
-        ],
-      });
-
-      const textContent = response.content.find((c) => c.type === "text");
-      res.json({ analysis: textContent?.text || "Could not analyze the image." });
-    } catch (error) {
-      console.error("Plant analysis error:", error);
-      res.status(500).json({ error: "Failed to analyze plant image" });
     }
   });
 

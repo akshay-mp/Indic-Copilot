@@ -8,7 +8,6 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import Builder from "@/pages/builder";
 import Dashboard from "@/pages/dashboard";
-import PlantDoctor from "@/pages/plant-doctor";
 
 function AppContent() {
   const [activePage, setActivePage] = useState("builder");
@@ -66,7 +65,6 @@ function AppContent() {
             {activePage === "dashboard" && (
               <Dashboard onNewApp={handleNewConversation} />
             )}
-            {activePage === "plant-doctor" && <PlantDoctor />}
           </main>
         </div>
       </div>

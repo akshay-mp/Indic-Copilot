@@ -13,7 +13,7 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Sparkles, LayoutGrid, Leaf, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { Sparkles, LayoutGrid, MessageSquare, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Conversation } from "@shared/schema";
 
@@ -70,16 +70,6 @@ export function AppSidebar({
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>My Apps</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={() => onNavigate("plant-doctor")}
-                  isActive={activePage === "plant-doctor"}
-                  data-testid="nav-plant-doctor"
-                >
-                  <Leaf className="w-4 h-4" />
-                  <span>Plant Doctor</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

@@ -7,7 +7,6 @@ Voice-driven AI app builder that lets users create web applications through voic
 - Voice input/output via Web Speech API (20+ languages including Kannada, Hindi, Tamil, Telugu, etc.)
 - Claude-powered planning phase: AI asks questions to understand app requirements
 - App generation: Claude generates complete HTML/CSS/JS apps
-- Plant Doctor: Upload plant photos for AI-powered disease diagnosis
 - Dashboard to manage all generated apps with fullscreen preview
 
 ## Architecture
@@ -19,7 +18,6 @@ Voice-driven AI app builder that lets users create web applications through voic
 ## Project Structure
 - `client/src/pages/builder.tsx` - Main voice chat builder interface
 - `client/src/pages/dashboard.tsx` - Generated apps dashboard
-- `client/src/pages/plant-doctor.tsx` - Plant disease identifier
 - `client/src/components/` - Reusable UI components
 - `client/src/hooks/use-voice.ts` - Voice hook (Silero VAD + Web Speech API)
 - `client/src/components/voice-overlay.tsx` - Voice mode side panel (right side, chat stays visible on left)
@@ -34,7 +32,6 @@ Voice-driven AI app builder that lets users create web applications through voic
 - `GET /api/conversations/:id` - Get conversation with messages
 - `POST /api/conversations/:id/messages` - Send message (SSE streaming)
 - `GET/DELETE /api/apps` - Generated apps CRUD
-- `POST /api/plant-analyze` - Plant disease analysis (accepts base64 image)
 - `POST /api/tts` - Text-to-speech via Sarvam AI REST API (bulbul:v3, speaker: shubh, returns WAV audio)
 
 ## Conversation Flow
