@@ -339,49 +339,52 @@ export async function registerRoutes(
         }, 30000);
 
         ws.on("open", () => {
-          const configMsg = {
+          const config = {
             type: "config",
             data: {
               target_language_code: targetLang,
               speaker: "meera",
-              pace: 1.0,
-              output_audio_codec: "mp3",
-              min_buffer_size: 50,
-              max_chunk_length: 200,
             },
           };
-          console.log("Sarvam TTS: sending config:", JSON.stringify(configMsg));
-          ws.send(JSON.stringify(configMsg));
+          console.log("Sarvam WS sending config:", JSON.stringify(config));
+          ws.send(JSON.stringify(config));
 
-          const chunks = text.match(/.{1,300}/g) || [text];
-          for (const chunk of chunks) {
-            ws.send(JSON.stringify({ type: "text", data: { text: chunk } }));
-          }
-          ws.send(JSON.stringify({ type: "flush" }));
-          ws.send(JSON.stringify({ type: "end" }));
+          setTimeout(() => {
+            const chunks = text.match(/.{1,300}/g) || [text];
+            for (const chunk of chunks) {
+              const textMsg = { type: "text", data: { text: chunk } };
+              console.log("Sarvam WS sending text:", JSON.stringify(textMsg).substring(0, 100));
+              ws.send(JSON.stringify(textMsg));
+            }
+            ws.send(JSON.stringify({ type: "flush" }));
+          }, 200);
         });
 
-        ws.on("message", (data: WebSocket.Data) => {
-          if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
-            audioChunks.push(Buffer.from(data as ArrayBuffer));
-            return;
-          }
+        ws.on("message", (rawData: WebSocket.Data) => {
+          const str = rawData.toString();
+          console.log("Sarvam WS message:", str.substring(0, 200));
           try {
-            const msg = JSON.parse(data.toString());
+            const msg = JSON.parse(str);
             if (msg.type === "audio" && msg.data?.audio) {
               audioChunks.push(Buffer.from(msg.data.audio, "base64"));
-            } else if (msg.type === "event" && msg.data?.event_type === "final") {
+            } else if (msg.type === "event") {
               clearTimeout(timeout);
               ws.close();
               resolve();
             } else if (msg.type === "error") {
               clearTimeout(timeout);
               ws.close();
-              const errMsg = msg.data?.message || msg.message || "Sarvam TTS error";
-              console.error("Sarvam TTS error:", errMsg);
+              const errMsg = msg.data?.message || "Sarvam TTS error";
+              console.error("Sarvam TTS WS error:", errMsg);
               reject(new Error(errMsg));
+            } else {
+              console.log("Sarvam WS unknown message type:", msg.type);
             }
-          } catch {}
+          } catch {
+            if (Buffer.isBuffer(rawData)) {
+              audioChunks.push(rawData);
+            }
+          }
         });
 
         ws.on("error", (err) => {
