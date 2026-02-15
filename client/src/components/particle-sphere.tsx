@@ -4,6 +4,7 @@ interface ParticleSphereProps {
   state: "idle" | "listening" | "userSpeaking" | "thinking" | "speaking";
   audioLevel?: number;
   size?: number;
+  isDark?: boolean;
 }
 
 interface Particle {
@@ -16,7 +17,7 @@ interface Particle {
   opacity: number;
 }
 
-export function ParticleSphere({ state, audioLevel = 0, size = 280 }: ParticleSphereProps) {
+export function ParticleSphere({ state, audioLevel = 0, size = 280, isDark = true }: ParticleSphereProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>([]);
   const animFrameRef = useRef<number>(0);
@@ -69,8 +70,16 @@ export function ParticleSphere({ state, audioLevel = 0, size = 280 }: ParticleSp
       let rotSpeed = 0.15;
       let dispersion = 0;
       let pulseAmount = 0;
-      let glowColor = "rgba(140, 160, 180, 0.06)";
-      let particleColor = { r: 200, g: 210, b: 220 };
+      let glowColor: string;
+      let particleColor: { r: number; g: number; b: number };
+
+      if (isDark) {
+        glowColor = "rgba(140, 160, 180, 0.06)";
+        particleColor = { r: 200, g: 210, b: 220 };
+      } else {
+        glowColor = "rgba(80, 100, 120, 0.08)";
+        particleColor = { r: 60, g: 70, b: 90 };
+      }
 
       if (state === "idle") {
         rotSpeed = 0.15;
@@ -80,26 +89,46 @@ export function ParticleSphere({ state, audioLevel = 0, size = 280 }: ParticleSp
         rotSpeed = 0.3;
         dispersion = 0.03;
         pulseAmount = Math.sin(t * 1.5) * 0.04;
-        glowColor = "rgba(100, 200, 180, 0.08)";
-        particleColor = { r: 140, g: 220, b: 200 };
+        if (isDark) {
+          glowColor = "rgba(100, 200, 180, 0.08)";
+          particleColor = { r: 140, g: 220, b: 200 };
+        } else {
+          glowColor = "rgba(20, 140, 120, 0.1)";
+          particleColor = { r: 20, g: 150, b: 130 };
+        }
       } else if (state === "userSpeaking") {
         rotSpeed = 0.6;
         dispersion = 0.08 + audioLevel * 0.15;
         pulseAmount = Math.sin(t * 3) * 0.06 + audioLevel * 0.1;
-        glowColor = "rgba(80, 220, 160, 0.12)";
-        particleColor = { r: 100, g: 240, b: 180 };
+        if (isDark) {
+          glowColor = "rgba(80, 220, 160, 0.12)";
+          particleColor = { r: 100, g: 240, b: 180 };
+        } else {
+          glowColor = "rgba(16, 160, 100, 0.14)";
+          particleColor = { r: 16, g: 160, b: 100 };
+        }
       } else if (state === "thinking") {
         rotSpeed = 0.8;
         dispersion = 0.05;
         pulseAmount = Math.sin(t * 2) * 0.08;
-        glowColor = "rgba(120, 140, 255, 0.1)";
-        particleColor = { r: 140, g: 160, b: 255 };
+        if (isDark) {
+          glowColor = "rgba(120, 140, 255, 0.1)";
+          particleColor = { r: 140, g: 160, b: 255 };
+        } else {
+          glowColor = "rgba(60, 80, 200, 0.12)";
+          particleColor = { r: 60, g: 80, b: 200 };
+        }
       } else if (state === "speaking") {
         rotSpeed = 0.4;
         dispersion = 0.06 + Math.sin(t * 2) * 0.04;
         pulseAmount = Math.sin(t * 1.8) * 0.05;
-        glowColor = "rgba(180, 140, 255, 0.1)";
-        particleColor = { r: 180, g: 160, b: 255 };
+        if (isDark) {
+          glowColor = "rgba(180, 140, 255, 0.1)";
+          particleColor = { r: 180, g: 160, b: 255 };
+        } else {
+          glowColor = "rgba(120, 80, 200, 0.12)";
+          particleColor = { r: 120, g: 80, b: 200 };
+        }
       }
 
       const glow = ctx.createRadialGradient(center, center, 0, center, center, baseRadius * 1.2);
@@ -149,7 +178,7 @@ export function ParticleSphere({ state, audioLevel = 0, size = 280 }: ParticleSp
     return () => {
       cancelAnimationFrame(animFrameRef.current);
     };
-  }, [state, audioLevel, size]);
+  }, [state, audioLevel, size, isDark]);
 
   return (
     <canvas

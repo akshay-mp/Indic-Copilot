@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from "react";
 import { ParticleSphere } from "@/components/particle-sphere";
 import { LanguageSelector } from "@/components/language-selector";
 import { X, Mic, MicOff } from "lucide-react";
+import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 
 interface VoiceOverlayProps {
@@ -39,6 +40,9 @@ export function VoiceOverlay({
   language,
   onLanguageChange,
 }: VoiceOverlayProps) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
   const startListeningRef = useRef(onStartListening);
   const isListeningRef = useRef(isListening);
   const isSpeakingRef = useRef(isSpeaking);
@@ -91,19 +95,18 @@ export function VoiceOverlay({
   else if (isListening) statusText = "Say something...";
 
   const statusColor = isSpeaking
-    ? "text-purple-400"
+    ? isDark ? "text-purple-400" : "text-purple-600"
     : isStreaming
-    ? "text-blue-400"
+    ? isDark ? "text-blue-400" : "text-blue-600"
     : userSpeaking
-    ? "text-emerald-400"
+    ? isDark ? "text-emerald-400" : "text-emerald-600"
     : isListening
-    ? "text-teal-400"
-    : "text-gray-500";
+    ? isDark ? "text-teal-400" : "text-teal-600"
+    : "text-muted-foreground";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-between"
-      style={{ backgroundColor: "#0a0a0f" }}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-between bg-background"
       data-testid="voice-overlay"
     >
       <div className="flex items-center justify-between w-full p-4">
@@ -111,7 +114,6 @@ export function VoiceOverlay({
         <LanguageSelector
           value={language}
           onChange={onLanguageChange}
-          dark
         />
         <div className="w-10" />
       </div>
@@ -122,6 +124,7 @@ export function VoiceOverlay({
             state={sphereState}
             audioLevel={audioLevel}
             size={280}
+            isDark={isDark}
           />
         </div>
 
@@ -140,7 +143,12 @@ export function VoiceOverlay({
       <div className="flex items-center gap-6 pb-12">
         <button
           onClick={handleClose}
-          className="w-14 h-14 rounded-full border border-gray-700 text-gray-400 bg-gray-900/50 flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+          className={cn(
+            "w-14 h-14 rounded-full border flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            isDark
+              ? "border-gray-700 text-gray-400 bg-gray-900/50"
+              : "border-gray-300 text-gray-500 bg-gray-100/80"
+          )}
           data-testid="button-voice-close"
         >
           <X className="w-6 h-6" />
@@ -158,13 +166,21 @@ export function VoiceOverlay({
           }}
           disabled={!isSupported}
           className={cn(
-            "w-14 h-14 rounded-full border flex items-center justify-center transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500",
+            "w-14 h-14 rounded-full border flex items-center justify-center transition-all duration-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             isListening && !isSpeaking
-              ? "border-teal-500/50 text-teal-400 bg-teal-500/10"
+              ? isDark
+                ? "border-teal-500/50 text-teal-400 bg-teal-500/10"
+                : "border-teal-500/50 text-teal-600 bg-teal-500/10"
               : isSpeaking
-              ? "border-purple-500/50 text-purple-400 bg-purple-500/10"
-              : "border-gray-700 text-gray-400 bg-gray-900/50",
-            userSpeaking && "border-emerald-500/50 text-emerald-400 bg-emerald-500/10 ring-2 ring-emerald-500/30",
+              ? isDark
+                ? "border-purple-500/50 text-purple-400 bg-purple-500/10"
+                : "border-purple-500/50 text-purple-600 bg-purple-500/10"
+              : isDark
+              ? "border-gray-700 text-gray-400 bg-gray-900/50"
+              : "border-gray-300 text-gray-500 bg-gray-100/80",
+            userSpeaking && (isDark
+              ? "border-emerald-500/50 text-emerald-400 bg-emerald-500/10 ring-2 ring-emerald-500/30"
+              : "border-emerald-500/50 text-emerald-600 bg-emerald-500/10 ring-2 ring-emerald-500/30"),
             !isSupported && "opacity-50 cursor-not-allowed"
           )}
           data-testid="button-voice-mic"
