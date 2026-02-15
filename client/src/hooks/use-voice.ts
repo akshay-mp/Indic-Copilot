@@ -698,16 +698,25 @@ export function useVoice({
       try {
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
         return new Promise<boolean>((resolve) => {
+          let resolved = false;
+          const done = (success: boolean) => {
+            if (!resolved) { resolved = true; resolve(success); }
+          };
           const source = ctx.createBufferSource();
           source.buffer = audioBuffer;
           source.connect(ctx.destination);
           source.onended = () => {
             console.log("Sarvam TTS REST: playback finished via Web Audio API");
-            resolve(true);
+            done(true);
           };
           source.start(0);
-          console.log("Sarvam TTS REST: playing audio via Web Audio API, duration:", audioBuffer.duration.toFixed(1), "s");
-          sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch { } } } as any;
+          const dur = audioBuffer.duration;
+          console.log("Sarvam TTS REST: playing audio via Web Audio API, duration:", dur.toFixed(1), "s");
+          sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch { } done(false); } } as any;
+          setTimeout(() => {
+            console.log("Sarvam TTS REST: safety timeout after", (dur + 3).toFixed(0), "s");
+            done(true);
+          }, (dur + 3) * 1000);
         });
       } catch (decodeErr) {
         console.warn("Sarvam TTS REST: Web Audio decode failed, trying HTMLAudioElement", decodeErr);
@@ -787,6 +796,12 @@ export function useVoice({
 
   const speak = useCallback(
     async (text: string, lang?: string) => {
+      const trimmedText = (text || "").trim();
+      if (!trimmedText) {
+        console.log("TTS speak: empty text, skipping");
+        onSpeakEndRef.current?.();
+        return;
+      }
       if (speakingGuardRef.current) {
         console.log("TTS speak: already speaking, ignoring duplicate call");
         return;
@@ -794,38 +809,37 @@ export function useVoice({
       speakingGuardRef.current = true;
 
       const targetLang = lang || language;
-      console.log("TTS speak called with lang:", targetLang, "text length:", text.length);
+      console.log("TTS speak called with lang:", targetLang, "text length:", trimmedText.length);
 
-      // Pause VAD and recognition while speaking
       prepareForSpeaking();
       setIsSpeaking(true);
 
-      // Try streaming first
-      const streamSuccess = await speakWithSarvamStream(text, targetLang);
+      try {
+        const streamSuccess = await speakWithSarvamStream(trimmedText, targetLang);
+        if (streamSuccess) {
+          speakingGuardRef.current = false;
+          resumeAfterSpeaking();
+          return;
+        }
 
-      if (streamSuccess) {
+        console.log("Streaming TTS failed, falling back to REST TTS for:", targetLang);
+        const restSuccess = await speakWithSarvamRest(trimmedText, targetLang);
+        if (restSuccess) {
+          speakingGuardRef.current = false;
+          resumeAfterSpeaking();
+          return;
+        }
+
+        console.log("Falling back to browser TTS for:", targetLang);
+        speakWithBrowser(trimmedText, targetLang, () => {
+          speakingGuardRef.current = false;
+          resumeAfterSpeaking();
+        });
+      } catch (e) {
+        console.warn("TTS speak error:", e);
         speakingGuardRef.current = false;
-        // Resume VAD and recognition after speaking ends
         resumeAfterSpeaking();
-        return;
       }
-
-      // Fallback to REST TTS
-      console.log("Streaming TTS failed, falling back to REST TTS for:", targetLang);
-      const restSuccess = await speakWithSarvamRest(text, targetLang);
-
-      if (restSuccess) {
-        speakingGuardRef.current = false;
-        resumeAfterSpeaking();
-        return;
-      }
-
-      // Final fallback: browser TTS
-      console.log("Falling back to browser TTS for:", targetLang);
-      speakWithBrowser(text, targetLang, () => {
-        speakingGuardRef.current = false;
-        resumeAfterSpeaking();
-      });
     },
     [language, prepareForSpeaking, speakWithSarvamStream, speakWithSarvamRest, speakWithBrowser, resumeAfterSpeaking]
   );

@@ -35,6 +35,7 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
   const wasListeningBeforeSpeakRef = useRef(false);
+  const sentViaVoiceRef = useRef(false);
   const voiceRef = useRef<any>(null);
 
   const sendMessageRef = useRef<(text: string) => void>(() => {});
@@ -46,6 +47,7 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
 
   const handleAutoSend = useCallback((text: string) => {
     setInputText("");
+    sentViaVoiceRef.current = true;
     sendMessageRef.current(text);
   }, []);
 
@@ -189,18 +191,21 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations", activeConvId] });
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
 
-                  if (autoSpeakRef.current && fullResponse && !wasAppCreated && !isBuildingPhase) {
+                  const usedVoice = sentViaVoiceRef.current;
+                  sentViaVoiceRef.current = false;
+
+                  if (autoSpeakRef.current && fullResponse && fullResponse.trim() && !wasAppCreated && !isBuildingPhase) {
                     const speakText = fullResponse.length > 500
                       ? fullResponse.slice(0, 500) + "..."
                       : fullResponse;
                     const v = voiceRef.current;
                     if (v) {
-                      wasListeningBeforeSpeakRef.current = v.isListening || voiceModeRef.current;
+                      wasListeningBeforeSpeakRef.current = v.isListening || voiceModeRef.current || usedVoice;
                       v.speak(speakText, language);
                     }
                   }
 
-                  if (wasAppCreated && voiceModeRef.current) {
+                  if (wasAppCreated && (voiceModeRef.current || usedVoice)) {
                     const v = voiceRef.current;
                     if (v) {
                       wasListeningBeforeSpeakRef.current = true;
