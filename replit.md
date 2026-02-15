@@ -1,4 +1,4 @@
-# VoiceForge - AI App Builder
+# Indic Copilot - AI App Builder
 
 ## Overview
 Voice-driven AI app builder that lets users create web applications through voice conversations in any Indian language (and more). Powered by Claude AI for both planning conversations and app generation.

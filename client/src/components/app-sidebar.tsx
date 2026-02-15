@@ -57,7 +57,7 @@ export function AppSidebar({
             <Sparkles className="w-4 h-4 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold">VoiceForge</h1>
+            <h1 className="text-sm font-semibold">Indic Copilot</h1>
             <p className="text-xs text-muted-foreground">AI App Builder</p>
           </div>
         </div>
