@@ -56,6 +56,7 @@ export function useVoice({
   const onInterimResultRef = useRef(onInterimResult);
   const onSpeakEndRef = useRef(onSpeakEnd);
   const languageRef = useRef(language);
+  const startListeningExternalRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     onAutoSendRef.current = onAutoSend;
@@ -199,20 +200,34 @@ export function useVoice({
       console.error("Speech recognition error:", event.error);
     };
 
+    let restartAttempts = 0;
     recognition.onend = () => {
       if (isActiveRef.current) {
-        try {
-          const r = new SpeechRecognition();
-          r.lang = languageRef.current;
-          r.interimResults = true;
-          r.continuous = true;
-          r.maxAlternatives = 1;
-          r.onresult = recognition.onresult;
-          r.onerror = recognition.onerror;
-          r.onend = recognition.onend;
-          recognitionRef.current = r;
-          r.start();
-        } catch { }
+        const attemptRestart = () => {
+          try {
+            const r = new SpeechRecognition();
+            r.lang = languageRef.current;
+            r.interimResults = true;
+            r.continuous = true;
+            r.maxAlternatives = 1;
+            r.onresult = recognition.onresult;
+            r.onerror = recognition.onerror;
+            r.onend = recognition.onend;
+            recognitionRef.current = r;
+            r.start();
+            restartAttempts = 0;
+          } catch (e) {
+            restartAttempts++;
+            console.warn("Recognition auto-restart failed (attempt", restartAttempts, "):", e);
+            if (restartAttempts < 3) {
+              setTimeout(attemptRestart, 500 * restartAttempts);
+            } else {
+              console.error("Recognition auto-restart failed after 3 attempts, mic may not be capturing");
+              recognitionRef.current = null;
+            }
+          }
+        };
+        attemptRestart();
       }
     };
 
@@ -349,6 +364,8 @@ export function useVoice({
     }
   }, [isSupported, startRecognition, handleSpeechEnd]);
 
+  startListeningExternalRef.current = startListening;
+
   const findVoice = useCallback((targetLang: string): SpeechSynthesisVoice | null => {
     if (typeof window === "undefined" || !window.speechSynthesis) return null;
     const voices = window.speechSynthesis.getVoices();
@@ -378,14 +395,66 @@ export function useVoice({
 
   const resumeAfterSpeaking = useCallback(() => {
     setIsSpeaking(false);
-    if (vadRef.current && isActiveRef.current) {
-      try { vadRef.current.start(); } catch { }
-      startRecognitionRef.current();
-    } else if (isActiveRef.current) {
-      startRecognitionRef.current();
+
+    if (!isActiveRef.current) {
+      onSpeakEndRef.current?.();
+      return;
     }
+
+    let vadOk = false;
+    if (vadRef.current) {
+      try {
+        vadRef.current.start();
+        vadOk = true;
+        console.log("VAD resumed after speaking");
+      } catch (e) {
+        console.warn("VAD restart failed after speaking:", e);
+      }
+    } else {
+      console.warn("VAD ref is null after speaking, needs full re-init");
+    }
+
+    let recogOk = false;
+    try {
+      startRecognitionRef.current();
+      recogOk = true;
+      console.log("Recognition restarted after speaking");
+    } catch (e) {
+      console.warn("Recognition restart failed after speaking:", e);
+    }
+
+    if (!vadOk) {
+      console.log("VAD not available after speaking, performing full mic re-init");
+      isActiveRef.current = false;
+      clearTimers();
+      stopRecognition();
+      if (vadRef.current) {
+        try { vadRef.current.pause(); vadRef.current.destroy(); } catch { }
+        vadRef.current = null;
+      }
+      setIsListening(false);
+      setVadReady(false);
+      setUserSpeaking(false);
+      setAudioLevel(0);
+
+      setTimeout(() => {
+        const startFn = startListeningExternalRef.current;
+        if (startFn) {
+          console.log("Full mic re-init: calling startListening");
+          startFn();
+        }
+      }, 500);
+    } else {
+      setTimeout(() => {
+        if (isActiveRef.current && !recognitionRef.current) {
+          console.log("Recognition lost after resume, restarting...");
+          try { startRecognitionRef.current(); } catch { }
+        }
+      }, 1500);
+    }
+
     onSpeakEndRef.current?.();
-  }, []);
+  }, [clearTimers, stopRecognition]);
 
   const sarvamAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);

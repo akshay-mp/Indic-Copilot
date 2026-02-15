@@ -55,7 +55,10 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
       wasListeningBeforeSpeakRef.current = false;
       setTimeout(() => {
         startListeningRef.current();
-      }, 300);
+      }, 600);
+      setTimeout(() => {
+        startListeningRef.current();
+      }, 2000);
     }
   }, []);
 
