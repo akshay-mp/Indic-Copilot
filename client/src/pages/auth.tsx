@@ -47,7 +47,7 @@ export default function AuthPage() {
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2">
-            <span className="text-3xl">🇮🇳</span>
+            <img src="/india-flag.png" alt="India flag" className="w-10 h-8 rounded-sm object-cover" />
             <h1 className="text-2xl font-bold" data-testid="text-app-title">Indic Copilot</h1>
           </div>
           <p className="text-sm text-muted-foreground">

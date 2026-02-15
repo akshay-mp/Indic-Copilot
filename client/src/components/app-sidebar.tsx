@@ -72,7 +72,7 @@ export function AppSidebar({
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          <span className="text-2xl">🇮🇳</span>
+          <img src="/india-flag.png" alt="India flag" className="w-8 h-6 rounded-sm object-cover" />
           <div>
             <h1 className="text-sm font-semibold">Indic Copilot</h1>
             <p className="text-xs text-muted-foreground">AI App Builder</p>
