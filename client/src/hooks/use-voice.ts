@@ -47,7 +47,9 @@ export function useVoice({
   const accumulatedTextRef = useRef("");
   const hasSpeechRef = useRef(false);
   const speechEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const vadLoadedRef = useRef(false);
 
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
@@ -75,6 +77,10 @@ export function useVoice({
       clearTimeout(speechEndTimerRef.current);
       speechEndTimerRef.current = null;
     }
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     if (audioLevelIntervalRef.current) {
       clearInterval(audioLevelIntervalRef.current);
       audioLevelIntervalRef.current = null;
@@ -89,6 +95,39 @@ export function useVoice({
       recognitionRef.current = null;
     }
   }, []);
+
+  const doAutoSend = useCallback(() => {
+    const finalText = accumulatedTextRef.current.trim();
+    if (finalText && hasSpeechRef.current) {
+      accumulatedTextRef.current = "";
+      hasSpeechRef.current = false;
+      setTranscript("");
+      setInterimTranscript("");
+      setUserSpeaking(false);
+      setAudioLevel(0.05);
+
+      stopRecognition();
+
+      if (onAutoSendRef.current) {
+        onAutoSendRef.current(finalText);
+      }
+    }
+  }, [stopRecognition]);
+
+  const resetSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (hasSpeechRef.current && isActiveRef.current) {
+      silenceTimerRef.current = setTimeout(() => {
+        silenceTimerRef.current = null;
+        if (isActiveRef.current && hasSpeechRef.current) {
+          doAutoSend();
+        }
+      }, 1500);
+    }
+  }, [doAutoSend]);
 
   const startRecognition = useCallback(() => {
     if (!isSupported) return;
@@ -128,9 +167,13 @@ export function useVoice({
       if (currentInterim) {
         hasSpeechRef.current = true;
         setInterimTranscript(currentInterim);
+        setUserSpeaking(true);
+        setAudioLevel(0.7);
         onInterimResultRef.current?.(currentInterim);
-      } else {
+        resetSilenceTimer();
+      } else if (hasSpeechRef.current) {
         setInterimTranscript("");
+        resetSilenceTimer();
       }
     };
 
@@ -162,7 +205,7 @@ export function useVoice({
     } catch (e) {
       console.error("Failed to start speech recognition:", e);
     }
-  }, [isSupported, stopRecognition]);
+  }, [isSupported, stopRecognition, resetSilenceTimer]);
 
   const handleSpeechEnd = useCallback(() => {
     if (speechEndTimerRef.current) {
@@ -171,21 +214,11 @@ export function useVoice({
 
     speechEndTimerRef.current = setTimeout(() => {
       speechEndTimerRef.current = null;
-      const finalText = accumulatedTextRef.current.trim();
 
-      if (finalText && hasSpeechRef.current) {
-        accumulatedTextRef.current = "";
-        hasSpeechRef.current = false;
-        setTranscript("");
-        setInterimTranscript("");
+      if (isActiveRef.current && hasSpeechRef.current) {
+        doAutoSend();
 
-        stopRecognition();
-
-        if (onAutoSendRef.current) {
-          onAutoSendRef.current(finalText);
-        }
-
-        if (isActiveRef.current && continuous) {
+        if (continuous) {
           setTimeout(() => {
             if (isActiveRef.current) {
               startRecognition();
@@ -193,8 +226,8 @@ export function useVoice({
           }, 300);
         }
       }
-    }, 600);
-  }, [continuous, stopRecognition, startRecognition]);
+    }, 800);
+  }, [continuous, doAutoSend, startRecognition]);
 
   const stopListening = useCallback(() => {
     isActiveRef.current = false;
@@ -217,6 +250,7 @@ export function useVoice({
     setUserSpeaking(false);
     setAudioLevel(0);
     setInterimTranscript("");
+    setVadReady(false);
 
     if (finalText && onAutoSendRef.current) {
       onAutoSendRef.current(finalText);
@@ -228,6 +262,7 @@ export function useVoice({
     isActiveRef.current = true;
     accumulatedTextRef.current = "";
     hasSpeechRef.current = false;
+    vadLoadedRef.current = false;
     setTranscript("");
     setInterimTranscript("");
     setIsListening(true);
@@ -237,20 +272,24 @@ export function useVoice({
       const { MicVAD } = await import("@ricky0123/vad-web");
 
       const vad = await MicVAD.new({
-        modelURL: "/silero_vad_v5.onnx",
-        workletURL: "/vad.worklet.bundle.min.js",
+        model: "v5",
+        baseAssetPath: "/",
         onnxWASMBasePath: "/",
-        positiveSpeechThreshold: 0.6,
-        negativeSpeechThreshold: 0.35,
-        redemptionFrames: 10,
-        preSpeechPadFrames: 3,
-        minSpeechFrames: 4,
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.3,
+        redemptionMs: 500,
+        preSpeechPadMs: 200,
+        minSpeechMs: 250,
         onSpeechStart: () => {
           setUserSpeaking(true);
           setAudioLevel(0.7);
           if (speechEndTimerRef.current) {
             clearTimeout(speechEndTimerRef.current);
             speechEndTimerRef.current = null;
+          }
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
           }
         },
         onSpeechEnd: () => {
@@ -271,6 +310,7 @@ export function useVoice({
 
       vadRef.current = vad;
       vad.start();
+      vadLoadedRef.current = true;
       setVadReady(true);
 
       startRecognition();
@@ -283,16 +323,21 @@ export function useVoice({
         });
       }, 200);
     } catch (err) {
-      console.error("Failed to initialize Silero VAD:", err);
-      isActiveRef.current = false;
-      setIsListening(false);
-      setVadReady(false);
+      console.warn("Silero VAD not available, using fallback silence detection:", err);
+      vadLoadedRef.current = false;
 
-      if (isSupported) {
-        isActiveRef.current = true;
-        setIsListening(true);
-        startRecognition();
-      }
+      if (!isActiveRef.current) return;
+
+      setVadReady(true);
+      startRecognition();
+
+      audioLevelIntervalRef.current = setInterval(() => {
+        if (!isActiveRef.current) return;
+        setAudioLevel((prev) => {
+          const target = 0.05;
+          return prev + (target - prev) * 0.3;
+        });
+      }, 200);
     }
   }, [isSupported, startRecognition, handleSpeechEnd]);
 
@@ -306,6 +351,7 @@ export function useVoice({
         try { vadRef.current.pause(); } catch {}
       }
       stopRecognition();
+      clearTimers();
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = lang || language;
@@ -318,6 +364,8 @@ export function useVoice({
         if (vadRef.current && isActiveRef.current) {
           try { vadRef.current.start(); } catch {}
           startRecognition();
+        } else if (isActiveRef.current) {
+          startRecognition();
         }
         onSpeakEndRef.current?.();
       };
@@ -326,6 +374,8 @@ export function useVoice({
         if (vadRef.current && isActiveRef.current) {
           try { vadRef.current.start(); } catch {}
           startRecognition();
+        } else if (isActiveRef.current) {
+          startRecognition();
         }
         onSpeakEndRef.current?.();
       };
@@ -333,7 +383,7 @@ export function useVoice({
       synthRef.current = utterance;
       window.speechSynthesis.speak(utterance);
     },
-    [language, stopRecognition, startRecognition]
+    [language, stopRecognition, startRecognition, clearTimers]
   );
 
   const stopSpeaking = useCallback(() => {
@@ -342,6 +392,8 @@ export function useVoice({
       setIsSpeaking(false);
       if (vadRef.current && isActiveRef.current) {
         try { vadRef.current.start(); } catch {}
+        startRecognition();
+      } else if (isActiveRef.current) {
         startRecognition();
       }
       onSpeakEndRef.current?.();

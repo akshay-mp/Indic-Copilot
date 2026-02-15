@@ -86,13 +86,13 @@ export function VoiceOverlay({
   else if (userSpeaking) sphereState = "userSpeaking";
   else if (isListening) sphereState = "listening";
 
-  let statusText = "Say something...";
+  let statusText = "Tap mic to start";
   if (isStreaming) statusText = "Thinking...";
   else if (isSpeaking) statusText = "Speaking...";
   else if (userSpeaking) statusText = interimTranscript || "Listening...";
   else if (isListening && interimTranscript) statusText = interimTranscript;
   else if (isListening && !vadReady) statusText = "Initializing...";
-  else if (isListening) statusText = "Say something...";
+  else if (isListening && vadReady) statusText = "Listening...";
 
   const statusColor = isSpeaking
     ? isDark ? "text-purple-400" : "text-purple-600"
