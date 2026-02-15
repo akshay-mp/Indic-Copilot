@@ -419,9 +419,185 @@ export function useVoice({
     };
   }, [getAudioContext]);
 
-  const speakWithSarvam = useCallback(async (text: string, targetLang: string): Promise<boolean> => {
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  const speakWithSarvamStream = useCallback(async (text: string, targetLang: string): Promise<boolean> => {
     try {
-      console.log("Sarvam TTS: requesting audio for lang:", targetLang);
+      console.log("Sarvam TTS Stream: requesting streaming audio for lang:", targetLang);
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+
+      const response = await fetch("/api/tts-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language: targetLang }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        console.warn("Sarvam TTS Stream: request failed:", err.error || response.status);
+        streamAbortRef.current = null;
+        return false;
+      }
+
+      if (!response.body) {
+        console.warn("Sarvam TTS Stream: no response body (ReadableStream not supported)");
+        streamAbortRef.current = null;
+        return false;
+      }
+
+      // Read SSE events and accumulate audio chunks
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const audioChunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      let playbackStarted = false;
+      let currentSource: AudioBufferSourceNode | null = null;
+      let sseBuffer = "";
+
+      const ctx = getAudioContext();
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      // Helper: decode accumulated chunks and start playback
+      const startPlayback = async (): Promise<boolean> => {
+        if (audioChunks.length === 0) return false;
+
+        // Combine all chunks into one buffer
+        const combined = new Uint8Array(totalBytes);
+        let offset = 0;
+        for (const chunk of audioChunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+
+        try {
+          const audioBuffer = await ctx.decodeAudioData(combined.buffer.slice(0));
+          return new Promise<boolean>((resolve) => {
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(ctx.destination);
+            currentSource = source;
+            sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch { } } } as any;
+            source.onended = () => {
+              console.log("Sarvam TTS Stream: playback finished, duration:", audioBuffer.duration.toFixed(1), "s");
+              currentSource = null;
+              sarvamAudioRef.current = null;
+              resolve(true);
+            };
+            source.start(0);
+            console.log("Sarvam TTS Stream: playback started, duration:", audioBuffer.duration.toFixed(1), "s");
+          });
+        } catch (decodeErr) {
+          console.warn("Sarvam TTS Stream: decode failed, trying HTMLAudioElement", decodeErr);
+          // Fallback to HTMLAudioElement with blob
+          const audioBlob = new Blob(audioChunks as any[], { type: "audio/mp3" });
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          sarvamAudioRef.current = audio;
+
+          return new Promise<boolean>((resolve) => {
+            audio.onended = () => {
+              console.log("Sarvam TTS Stream: HTMLAudioElement playback finished");
+              URL.revokeObjectURL(audioUrl);
+              sarvamAudioRef.current = null;
+              resolve(true);
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(audioUrl);
+              sarvamAudioRef.current = null;
+              resolve(false);
+            };
+            audio.play().catch(() => {
+              URL.revokeObjectURL(audioUrl);
+              sarvamAudioRef.current = null;
+              resolve(false);
+            });
+          });
+        }
+      };
+
+      // Read the SSE stream
+      let streamDone = false;
+      let hasError = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) {
+          streamDone = true;
+          break;
+        }
+
+        sseBuffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from the buffer
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.substring(6).trim();
+          if (!jsonStr) continue;
+
+          try {
+            const event = JSON.parse(jsonStr);
+
+            if (event.audio) {
+              // Decode base64 audio chunk
+              const binaryStr = atob(event.audio);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i);
+              }
+              audioChunks.push(bytes);
+              totalBytes += bytes.length;
+              console.log("Sarvam TTS Stream: chunk received,", bytes.length, "bytes, total:", totalBytes);
+            }
+
+            if (event.done) {
+              console.log("Sarvam TTS Stream: all chunks received, total:", totalBytes, "bytes in", audioChunks.length, "chunks");
+              streamDone = true;
+              break;
+            }
+
+            if (event.error) {
+              console.warn("Sarvam TTS Stream: server error:", event.error);
+              hasError = true;
+              streamDone = true;
+              break;
+            }
+          } catch {
+            // Skip malformed JSON
+          }
+        }
+      }
+
+      streamAbortRef.current = null;
+
+      if (hasError || audioChunks.length === 0) {
+        return false;
+      }
+
+      // Start playback with all accumulated audio
+      return await startPlayback();
+
+    } catch (e: any) {
+      if (e.name === "AbortError") {
+        console.log("Sarvam TTS Stream: aborted by user");
+        return true; // Don't fall back on intentional abort
+      }
+      console.warn("Sarvam TTS Stream: error", e);
+      streamAbortRef.current = null;
+      return false;
+    }
+  }, [getAudioContext]);
+
+  // Keep the old REST TTS as a fallback
+  const speakWithSarvamRest = useCallback(async (text: string, targetLang: string): Promise<boolean> => {
+    try {
+      console.log("Sarvam TTS REST fallback: requesting audio for lang:", targetLang);
       const controller = new AbortController();
       const clientTimeout = setTimeout(() => controller.abort(), 15000);
       const response = await fetch("/api/tts", {
@@ -434,17 +610,17 @@ export function useVoice({
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        console.warn("Sarvam TTS failed:", err.error || response.status);
+        console.warn("Sarvam TTS REST failed:", err.error || response.status);
         return false;
       }
 
       const contentType = response.headers.get("content-type") || "unknown";
       const arrayBuffer = await response.arrayBuffer();
       if (arrayBuffer.byteLength === 0) {
-        console.warn("Sarvam TTS: empty audio response");
+        console.warn("Sarvam TTS REST: empty audio response");
         return false;
       }
-      console.log("Sarvam TTS: received", arrayBuffer.byteLength, "bytes, content-type:", contentType);
+      console.log("Sarvam TTS REST: received", arrayBuffer.byteLength, "bytes, content-type:", contentType);
 
       const ctx = getAudioContext();
       if (ctx.state === "suspended") {
@@ -457,15 +633,15 @@ export function useVoice({
           source.buffer = audioBuffer;
           source.connect(ctx.destination);
           source.onended = () => {
-            console.log("Sarvam TTS: playback finished via Web Audio API");
+            console.log("Sarvam TTS REST: playback finished via Web Audio API");
             resolve(true);
           };
           source.start(0);
-          console.log("Sarvam TTS: playing audio via Web Audio API, duration:", audioBuffer.duration.toFixed(1), "s");
+          console.log("Sarvam TTS REST: playing audio via Web Audio API, duration:", audioBuffer.duration.toFixed(1), "s");
           sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch { } } } as any;
         });
       } catch (decodeErr) {
-        console.warn("Sarvam TTS: Web Audio decode failed, trying HTMLAudioElement", decodeErr);
+        console.warn("Sarvam TTS REST: Web Audio decode failed, trying HTMLAudioElement", decodeErr);
         const audioBlob = new Blob([arrayBuffer], { type: "audio/wav" });
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
@@ -473,7 +649,7 @@ export function useVoice({
 
         return new Promise<boolean>((resolve) => {
           audio.onended = () => {
-            console.log("Sarvam TTS: playback finished via HTMLAudioElement");
+            console.log("Sarvam TTS REST: playback finished via HTMLAudioElement");
             URL.revokeObjectURL(audioUrl);
             sarvamAudioRef.current = null;
             resolve(true);
@@ -484,7 +660,7 @@ export function useVoice({
             resolve(false);
           };
           audio.play().catch((e) => {
-            console.warn("Sarvam TTS: HTMLAudioElement play() also failed", e);
+            console.warn("Sarvam TTS REST: HTMLAudioElement play() also failed", e);
             URL.revokeObjectURL(audioUrl);
             sarvamAudioRef.current = null;
             resolve(false);
@@ -492,7 +668,7 @@ export function useVoice({
         });
       }
     } catch (e) {
-      console.warn("Sarvam TTS: network error", e);
+      console.warn("Sarvam TTS REST: network error", e);
       return false;
     }
   }, [getAudioContext]);
@@ -551,28 +727,47 @@ export function useVoice({
       const targetLang = lang || language;
       console.log("TTS speak called with lang:", targetLang, "text length:", text.length);
 
+      // Pause VAD and recognition while speaking
       prepareForSpeaking();
       setIsSpeaking(true);
 
-      const sarvamSuccess = await speakWithSarvam(text, targetLang);
+      // Try streaming first
+      const streamSuccess = await speakWithSarvamStream(text, targetLang);
 
-      if (sarvamSuccess) {
+      if (streamSuccess) {
+        speakingGuardRef.current = false;
+        // Resume VAD and recognition after speaking ends
+        resumeAfterSpeaking();
+        return;
+      }
+
+      // Fallback to REST TTS
+      console.log("Streaming TTS failed, falling back to REST TTS for:", targetLang);
+      const restSuccess = await speakWithSarvamRest(text, targetLang);
+
+      if (restSuccess) {
         speakingGuardRef.current = false;
         resumeAfterSpeaking();
         return;
       }
 
+      // Final fallback: browser TTS
       console.log("Falling back to browser TTS for:", targetLang);
       speakWithBrowser(text, targetLang, () => {
         speakingGuardRef.current = false;
         resumeAfterSpeaking();
       });
     },
-    [language, prepareForSpeaking, speakWithSarvam, speakWithBrowser, resumeAfterSpeaking]
+    [language, prepareForSpeaking, speakWithSarvamStream, speakWithSarvamRest, speakWithBrowser, resumeAfterSpeaking]
   );
 
   const stopSpeaking = useCallback(() => {
     speakingGuardRef.current = false;
+    // Abort any in-progress streaming fetch
+    if (streamAbortRef.current) {
+      streamAbortRef.current.abort();
+      streamAbortRef.current = null;
+    }
     if (sarvamAudioRef.current) {
       sarvamAudioRef.current.pause();
       sarvamAudioRef.current = null;
@@ -580,6 +775,7 @@ export function useVoice({
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    // Resume VAD and recognition
     resumeAfterSpeaking();
   }, [resumeAfterSpeaking]);
 
@@ -615,6 +811,10 @@ export function useVoice({
       if (sarvamAudioRef.current) {
         sarvamAudioRef.current.pause();
         sarvamAudioRef.current = null;
+      }
+      if (streamAbortRef.current) {
+        streamAbortRef.current.abort();
+        streamAbortRef.current = null;
       }
       speakingGuardRef.current = false;
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {

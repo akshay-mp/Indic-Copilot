@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import Anthropic from "@anthropic-ai/sdk";
+import WebSocket from "ws";
 
 
 const anthropic = new Anthropic({
@@ -360,6 +361,145 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Sarvam TTS error:", error.message || error);
       res.status(500).json({ error: "TTS failed: " + (error.message || "Unknown error") });
+    }
+  });
+
+  // --- Sarvam Streaming TTS (WebSocket → SSE) ---
+  app.post("/api/tts-stream", async (req, res) => {
+    const apiKey = process.env.SARVAM_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "Sarvam API key not configured" });
+    }
+
+    const { text, language } = req.body;
+    if (!text) return res.status(400).json({ error: "Text required" });
+
+    const targetLang = sarvamLangMap[language || "en-US"];
+    if (!targetLang) {
+      return res.status(400).json({ error: "Language not supported by Sarvam TTS" });
+    }
+
+    const ttsText = text.substring(0, 3000);
+
+    // Set up SSE response
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    let wsCleanedUp = false;
+    const cleanup = (ws: WebSocket) => {
+      if (wsCleanedUp) return;
+      wsCleanedUp = true;
+      try {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      } catch { }
+    };
+
+    try {
+      const wsUrl = `wss://api.sarvam.ai/text-to-speech/streaming?api-subscription-key=${encodeURIComponent(apiKey)}`;
+      const ws = new WebSocket(wsUrl);
+
+      // Timeout: close if no response after 30s
+      const timeout = setTimeout(() => {
+        console.error("Sarvam streaming TTS: timeout");
+        res.write(`data: ${JSON.stringify({ error: "Streaming TTS timeout" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        cleanup(ws);
+        res.end();
+      }, 30000);
+
+      // Track if client disconnects
+      req.on("close", () => {
+        clearTimeout(timeout);
+        cleanup(ws);
+      });
+
+      ws.on("open", () => {
+        console.log("Sarvam streaming TTS: WebSocket connected");
+
+        // 1. Send config
+        ws.send(JSON.stringify({
+          type: "config",
+          data: {
+            target_language_code: targetLang,
+            speaker: "shubh",
+            output_audio_codec: "mp3",
+            min_buffer_size: 50,
+            max_chunk_length: 200,
+          },
+        }));
+
+        // 2. Send text
+        ws.send(JSON.stringify({
+          type: "text",
+          data: { text: ttsText },
+        }));
+
+        // 3. Send flush to start processing
+        ws.send(JSON.stringify({ type: "flush" }));
+      });
+
+      ws.on("message", (data: WebSocket.Data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+
+          if (msg.type === "audio" && msg.data?.audio) {
+            // Forward audio chunk as SSE
+            res.write(`data: ${JSON.stringify({
+              audio: msg.data.audio,
+              contentType: msg.data.content_type || "audio/mp3",
+            })}\n\n`);
+          } else if (msg.type === "event") {
+            console.log("Sarvam streaming TTS: event", msg.data?.event_type);
+            if (msg.data?.event_type === "final") {
+              clearTimeout(timeout);
+              res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+              cleanup(ws);
+              res.end();
+            }
+          } else if (msg.type === "error") {
+            console.error("Sarvam streaming TTS: error message", msg.data);
+            clearTimeout(timeout);
+            res.write(`data: ${JSON.stringify({ error: msg.data?.message || "Streaming TTS error" })}\n\n`);
+            res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+            cleanup(ws);
+            res.end();
+          }
+        } catch (parseErr) {
+          console.error("Sarvam streaming TTS: parse error", parseErr);
+        }
+      });
+
+      ws.on("error", (err) => {
+        console.error("Sarvam streaming TTS: WebSocket error", err.message);
+        clearTimeout(timeout);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ error: "WebSocket error: " + err.message })}\n\n`);
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          res.end();
+        }
+      });
+
+      ws.on("close", () => {
+        clearTimeout(timeout);
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+          res.end();
+        }
+      });
+
+    } catch (error: any) {
+      console.error("Sarvam streaming TTS error:", error.message || error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "TTS stream failed: " + (error.message || "Unknown error") });
+      } else if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: "Stream failed" })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        res.end();
+      }
     }
   });
 
