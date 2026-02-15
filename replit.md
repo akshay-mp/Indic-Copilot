@@ -40,8 +40,11 @@ Voice-driven AI app builder that lets users create web applications through voic
 ## Conversation Flow
 1. Planning phase: Claude asks clarifying questions about the app
 2. User approves the plan (says "yes", "approve", etc.)
-3. Build phase: Claude generates a complete HTML app
-4. App is saved and viewable in the dashboard
+3. Build phase: Server sends `{ phase: "building" }` SSE event, then streams HTML silently (not displayed in chat, not sent to TTS)
+4. Server detects HTML in response, saves as app, sends `{ appCreated: true, appId }` event
+5. Client shows "Building your app..." indicator during generation, then toast on completion
+6. In voice mode, speaks "Your app is ready!" instead of reading code aloud
+7. ChatMessage component detects HTML content in saved messages and shows "App Generated" card instead of raw code
 
 ## Voice Architecture (Voice Sandwich)
 - **VAD**: Silero VAD v5 running in browser via ONNX Runtime Web (@ricky0123/vad-web)

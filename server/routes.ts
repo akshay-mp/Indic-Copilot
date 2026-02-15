@@ -165,6 +165,10 @@ export async function registerRoutes(
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
+      if (shouldBuildApp) {
+        res.write(`data: ${JSON.stringify({ phase: "building" })}\n\n`);
+      }
+
       const stream = anthropic.messages.stream({
         model: "claude-sonnet-4-5",
         max_tokens: 8192,

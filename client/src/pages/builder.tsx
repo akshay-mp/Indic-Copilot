@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Send, Sparkles, Loader2, Volume2, VolumeX, Mic } from "lucide-react";
+import { Send, Sparkles, Loader2, Volume2, VolumeX, Mic, Code, ExternalLink } from "lucide-react";
 import { VoiceOverlay } from "@/components/voice-overlay";
 import { useToast } from "@/hooks/use-toast";
 import type { Conversation, Message } from "@shared/schema";
@@ -24,6 +24,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
   const [inputText, setInputText] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isBuildingApp, setIsBuildingApp] = useState(false);
   const [pendingSend, setPendingSend] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceMode, setVoiceMode] = useState(false);
@@ -106,6 +107,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
 
     setInputText("");
     setIsStreaming(true);
+    setIsBuildingApp(false);
     setStreamingContent("");
 
     queryClient.setQueryData(
@@ -133,6 +135,8 @@ export default function Builder({ conversationId, onConversationCreated }: Build
       let fullResponse = "";
       let buffer = "";
       let wasAppCreated = false;
+      let isBuildingPhase = false;
+      let createdAppId: number | null = null;
 
       if (reader) {
         while (true) {
@@ -147,23 +151,33 @@ export default function Builder({ conversationId, onConversationCreated }: Build
             if (line.startsWith("data: ")) {
               try {
                 const data = JSON.parse(line.slice(6));
+                if (data.phase === "building") {
+                  isBuildingPhase = true;
+                  setIsBuildingApp(true);
+                  setPendingSend(false);
+                }
                 if (data.content) {
                   fullResponse += data.content;
-                  setStreamingContent(fullResponse);
+                  if (!isBuildingPhase) {
+                    setStreamingContent(fullResponse);
+                  }
                   setPendingSend(false);
                 }
                 if (data.appCreated) {
                   wasAppCreated = true;
+                  createdAppId = data.appId;
+                  setIsBuildingApp(false);
                   queryClient.invalidateQueries({ queryKey: ["/api/apps"] });
                   toast({ title: "App created!", description: "Your app has been built. Check the dashboard to view it." });
                 }
                 if (data.done) {
                   setStreamingContent("");
                   setIsStreaming(false);
+                  setIsBuildingApp(false);
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations", activeConvId] });
                   queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
 
-                  if (autoSpeakRef.current && fullResponse && !wasAppCreated) {
+                  if (autoSpeakRef.current && fullResponse && !wasAppCreated && !isBuildingPhase) {
                     const speakText = fullResponse.length > 500
                       ? fullResponse.slice(0, 500) + "..."
                       : fullResponse;
@@ -171,6 +185,16 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                     if (v) {
                       wasListeningBeforeSpeakRef.current = v.isListening || voiceModeRef.current;
                       v.speak(speakText, language);
+                    }
+                  }
+
+                  if (wasAppCreated && voiceModeRef.current) {
+                    const v = voiceRef.current;
+                    if (v) {
+                      wasListeningBeforeSpeakRef.current = true;
+                      const langName = language.startsWith("kn") ? "Kannada" : language.startsWith("hi") ? "Hindi" : language.startsWith("en") ? "English" : "";
+                      const doneMsg = langName === "Kannada" ? "ನಿಮ್ಮ ಅಪ್ಲಿಕೇಶನ್ ಸಿದ್ಧವಾಗಿದೆ!" : langName === "Hindi" ? "आपका ऐप तैयार है!" : "Your app is ready!";
+                      v.speak(doneMsg, language);
                     }
                   }
                 }
@@ -182,6 +206,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
     } catch (error) {
       toast({ title: "Error", description: "Failed to send message. Please try again.", variant: "destructive" });
       setIsStreaming(false);
+      setIsBuildingApp(false);
       setPendingSend(false);
       setStreamingContent("");
     }
@@ -263,7 +288,23 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                 />
               ))
             )}
-            {isStreaming && !streamingContent && (
+            {isBuildingApp && (
+              <div className="flex gap-3 py-4 px-3">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Code className="w-4 h-4 text-primary" />
+                </div>
+                <Card className="flex-1 p-4">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                    <div>
+                      <p className="text-sm font-medium" data-testid="text-building-app">Building your app...</p>
+                      <p className="text-xs text-muted-foreground">Generating HTML, CSS, and JavaScript</p>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
+            {isStreaming && !streamingContent && !isBuildingApp && (
               <div className="flex gap-3 py-4 px-3">
                 <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
                   <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
