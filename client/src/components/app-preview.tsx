@@ -22,7 +22,8 @@ export function AppPreview({ app, onClose }: AppPreviewProps) {
         <iframe
           src={`/api/apps/${app.id}/serve`}
           className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-modals allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+          allow="camera; microphone; geolocation"
           title={app.title}
         />
       </div>

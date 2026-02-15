@@ -55,7 +55,8 @@ export default function SharedAppPage({ shareId }: SharedAppPageProps) {
         <iframe
           src={`/api/shared/${shareId}/serve`}
           className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+          allow="camera; microphone; geolocation"
           title={app.title}
           data-testid="iframe-shared-app"
         />
@@ -83,7 +84,8 @@ export default function SharedAppPage({ shareId }: SharedAppPageProps) {
         <iframe
           src={`/api/shared/${shareId}/serve`}
           className="w-full h-full border-0"
-          sandbox="allow-scripts allow-forms allow-same-origin"
+          sandbox="allow-scripts allow-forms allow-modals allow-same-origin allow-popups"
+          allow="camera; microphone; geolocation"
           title={app.title}
           data-testid="iframe-shared-app"
         />
