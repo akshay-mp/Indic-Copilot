@@ -6,7 +6,6 @@ Indic Copilot lets anyone — regardless of coding ability — create complete w
 
 Just describe what you want, answer a few clarifying questions, and Indic Copilot generates a production-ready HTML/CSS/JS app — complete with **database persistence** and **AI capabilities** (including vision).
 
-![Voice Interface](attached_assets/image_1771134602999.png)
 
 ---
 
