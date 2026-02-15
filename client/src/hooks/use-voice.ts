@@ -6,8 +6,6 @@ interface UseVoiceOptions {
   onInterimResult?: (text: string) => void;
   onAutoSend?: (text: string) => void;
   continuous?: boolean;
-  vadEnabled?: boolean;
-  silenceTimeout?: number;
 }
 
 interface UseVoiceReturn {
@@ -21,9 +19,9 @@ interface UseVoiceReturn {
   isSpeaking: boolean;
   stopSpeaking: () => void;
   audioLevel: number;
+  vadReady: boolean;
+  userSpeaking: boolean;
 }
-
-const SILENCE_AUDIO_THRESHOLD = 0.05;
 
 export function useVoice({
   language,
@@ -31,28 +29,28 @@ export function useVoice({
   onInterimResult,
   onAutoSend,
   continuous = true,
-  vadEnabled = true,
-  silenceTimeout = 2000,
 }: UseVoiceOptions): UseVoiceReturn {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [audioLevel, setAudioLevel] = useState(0);
+  const [vadReady, setVadReady] = useState(false);
+  const [userSpeaking, setUserSpeaking] = useState(false);
 
+  const vadRef = useRef<any>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animFrameRef = useRef<number>(0);
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasSpeechRef = useRef(false);
-  const accumulatedTextRef = useRef("");
   const isActiveRef = useRef(false);
+  const accumulatedTextRef = useRef("");
+  const hasSpeechRef = useRef(false);
+  const speechEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
   const onInterimResultRef = useRef(onInterimResult);
+  const languageRef = useRef(language);
 
   useEffect(() => {
     onAutoSendRef.current = onAutoSend;
@@ -60,135 +58,46 @@ export function useVoice({
     onInterimResultRef.current = onInterimResult;
   }, [onAutoSend, onResult, onInterimResult]);
 
+  useEffect(() => {
+    languageRef.current = language;
+  }, [language]);
+
   const isSupported =
     typeof window !== "undefined" &&
     ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
-  const clearSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
+  const clearTimers = useCallback(() => {
+    if (speechEndTimerRef.current) {
+      clearTimeout(speechEndTimerRef.current);
+      speechEndTimerRef.current = null;
+    }
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
     }
   }, []);
 
-  const cleanupAudio = useCallback(() => {
-    cancelAnimationFrame(animFrameRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-    setAudioLevel(0);
-  }, []);
-
-  const flushAndStop = useCallback(() => {
-    if (!isActiveRef.current) return;
-    isActiveRef.current = false;
-    clearSilenceTimer();
-
+  const stopRecognition = useCallback(() => {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
       } catch {}
       recognitionRef.current = null;
     }
+  }, []);
 
-    const finalText = accumulatedTextRef.current.trim();
-    accumulatedTextRef.current = "";
-    hasSpeechRef.current = false;
-    cleanupAudio();
-    setIsListening(false);
-    setInterimTranscript("");
-
-    if (finalText && onAutoSendRef.current) {
-      onAutoSendRef.current(finalText);
-    }
-  }, [clearSilenceTimer, cleanupAudio]);
-
-  const stopListening = useCallback(() => {
-    flushAndStop();
-  }, [flushAndStop]);
-
-  const startAudioMonitoring = useCallback(async () => {
-    if (audioContextRef.current) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!isActiveRef.current) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      streamRef.current = stream;
-
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.8;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-      const checkLevel = () => {
-        if (!analyserRef.current || !isActiveRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
-        }
-        const avg = sum / dataArray.length;
-        const normalized = Math.min(avg / 80, 1);
-        setAudioLevel(normalized);
-
-        if (hasSpeechRef.current && accumulatedTextRef.current.trim()) {
-          if (normalized < SILENCE_AUDIO_THRESHOLD) {
-            if (!silenceTimerRef.current) {
-              silenceTimerRef.current = setTimeout(() => {
-                if (isActiveRef.current && hasSpeechRef.current && accumulatedTextRef.current.trim()) {
-                  flushAndStop();
-                }
-              }, silenceTimeout);
-            }
-          } else {
-            clearSilenceTimer();
-          }
-        }
-
-        animFrameRef.current = requestAnimationFrame(checkLevel);
-      };
-      checkLevel();
-    } catch (err) {
-      console.warn("Could not start audio monitoring for VAD:", err);
-    }
-  }, [silenceTimeout, flushAndStop, clearSilenceTimer]);
-
-  const startListening = useCallback(() => {
-    if (!isSupported || isActiveRef.current) return;
-    isActiveRef.current = true;
+  const startRecognition = useCallback(() => {
+    if (!isSupported) return;
+    stopRecognition();
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
 
-    recognition.lang = language;
+    recognition.lang = languageRef.current;
     recognition.interimResults = true;
-    recognition.continuous = continuous;
+    recognition.continuous = true;
     recognition.maxAlternatives = 1;
-
-    accumulatedTextRef.current = "";
-    hasSpeechRef.current = false;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setTranscript("");
-      setInterimTranscript("");
-    };
 
     recognition.onresult = (event: any) => {
       if (!isActiveRef.current) return;
@@ -222,48 +131,166 @@ export function useVoice({
     };
 
     recognition.onerror = (event: any) => {
-      if (event.error === "no-speech" || event.error === "aborted") {
-        return;
-      }
+      if (event.error === "no-speech" || event.error === "aborted") return;
       console.error("Speech recognition error:", event.error);
-      isActiveRef.current = false;
-      accumulatedTextRef.current = "";
-      hasSpeechRef.current = false;
-      clearSilenceTimer();
-      cleanupAudio();
-      recognitionRef.current = null;
-      setIsListening(false);
     };
 
     recognition.onend = () => {
-      if (!isActiveRef.current) return;
-
-      if (continuous) {
+      if (isActiveRef.current) {
         try {
-          recognition.start();
-        } catch {
-          isActiveRef.current = false;
-          cleanupAudio();
-          clearSilenceTimer();
-          setIsListening(false);
-        }
-      } else {
-        flushAndStop();
+          const r = new SpeechRecognition();
+          r.lang = languageRef.current;
+          r.interimResults = true;
+          r.continuous = true;
+          r.maxAlternatives = 1;
+          r.onresult = recognition.onresult;
+          r.onerror = recognition.onerror;
+          r.onend = recognition.onend;
+          recognitionRef.current = r;
+          r.start();
+        } catch {}
       }
     };
 
     recognitionRef.current = recognition;
-
-    if (vadEnabled) {
-      startAudioMonitoring();
-    }
-
     try {
       recognition.start();
-    } catch {
-      isActiveRef.current = false;
+    } catch (e) {
+      console.error("Failed to start speech recognition:", e);
     }
-  }, [isSupported, language, continuous, vadEnabled, clearSilenceTimer, startAudioMonitoring, cleanupAudio, flushAndStop]);
+  }, [isSupported, stopRecognition]);
+
+  const handleSpeechEnd = useCallback(() => {
+    if (speechEndTimerRef.current) {
+      clearTimeout(speechEndTimerRef.current);
+    }
+
+    speechEndTimerRef.current = setTimeout(() => {
+      speechEndTimerRef.current = null;
+      const finalText = accumulatedTextRef.current.trim();
+
+      if (finalText && hasSpeechRef.current) {
+        accumulatedTextRef.current = "";
+        hasSpeechRef.current = false;
+        setTranscript("");
+        setInterimTranscript("");
+
+        stopRecognition();
+
+        if (onAutoSendRef.current) {
+          onAutoSendRef.current(finalText);
+        }
+
+        if (isActiveRef.current && continuous) {
+          setTimeout(() => {
+            if (isActiveRef.current) {
+              startRecognition();
+            }
+          }, 300);
+        }
+      }
+    }, 600);
+  }, [continuous, stopRecognition, startRecognition]);
+
+  const stopListening = useCallback(() => {
+    isActiveRef.current = false;
+    clearTimers();
+    stopRecognition();
+
+    if (vadRef.current) {
+      try {
+        vadRef.current.pause();
+        vadRef.current.destroy();
+      } catch {}
+      vadRef.current = null;
+    }
+
+    const finalText = accumulatedTextRef.current.trim();
+    accumulatedTextRef.current = "";
+    hasSpeechRef.current = false;
+
+    setIsListening(false);
+    setUserSpeaking(false);
+    setAudioLevel(0);
+    setInterimTranscript("");
+
+    if (finalText && onAutoSendRef.current) {
+      onAutoSendRef.current(finalText);
+    }
+  }, [clearTimers, stopRecognition]);
+
+  const startListening = useCallback(async () => {
+    if (isActiveRef.current) return;
+    isActiveRef.current = true;
+    accumulatedTextRef.current = "";
+    hasSpeechRef.current = false;
+    setTranscript("");
+    setInterimTranscript("");
+    setIsListening(true);
+    setVadReady(false);
+
+    try {
+      const { MicVAD } = await import("@ricky0123/vad-web");
+
+      const vad = await MicVAD.new({
+        modelURL: "/silero_vad_v5.onnx",
+        workletURL: "/vad.worklet.bundle.min.js",
+        onnxWASMBasePath: "/",
+        positiveSpeechThreshold: 0.6,
+        negativeSpeechThreshold: 0.35,
+        redemptionFrames: 10,
+        preSpeechPadFrames: 3,
+        minSpeechFrames: 4,
+        onSpeechStart: () => {
+          setUserSpeaking(true);
+          setAudioLevel(0.7);
+          if (speechEndTimerRef.current) {
+            clearTimeout(speechEndTimerRef.current);
+            speechEndTimerRef.current = null;
+          }
+        },
+        onSpeechEnd: () => {
+          setUserSpeaking(false);
+          setAudioLevel(0.1);
+          handleSpeechEnd();
+        },
+        onVADMisfire: () => {
+          setUserSpeaking(false);
+          setAudioLevel(0);
+        },
+      });
+
+      if (!isActiveRef.current) {
+        vad.destroy();
+        return;
+      }
+
+      vadRef.current = vad;
+      vad.start();
+      setVadReady(true);
+
+      startRecognition();
+
+      audioLevelIntervalRef.current = setInterval(() => {
+        if (!isActiveRef.current) return;
+        setAudioLevel((prev) => {
+          const target = 0.05;
+          return prev + (target - prev) * 0.3;
+        });
+      }, 200);
+    } catch (err) {
+      console.error("Failed to initialize Silero VAD:", err);
+      isActiveRef.current = false;
+      setIsListening(false);
+      setVadReady(false);
+
+      if (isSupported) {
+        isActiveRef.current = true;
+        setIsListening(true);
+        startRecognition();
+      }
+    }
+  }, [isSupported, startRecognition, handleSpeechEnd]);
 
   const speak = useCallback(
     (text: string, lang?: string) => {
@@ -293,43 +320,37 @@ export function useVoice({
     }
   }, []);
 
-  const languageRef = useRef(language);
   useEffect(() => {
-    if (languageRef.current !== language && isActiveRef.current) {
-      languageRef.current = language;
-      isActiveRef.current = false;
-      clearSilenceTimer();
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch {}
-        recognitionRef.current = null;
+    if (isActiveRef.current && recognitionRef.current) {
+      const currentLang = recognitionRef.current.lang;
+      if (currentLang !== language) {
+        stopRecognition();
+        setTimeout(() => {
+          if (isActiveRef.current) {
+            startRecognition();
+          }
+        }, 200);
       }
-      accumulatedTextRef.current = "";
-      hasSpeechRef.current = false;
-      cleanupAudio();
-      setIsListening(false);
-      setInterimTranscript("");
-      setTimeout(() => {
-        startListening();
-      }, 200);
     }
-    languageRef.current = language;
-  }, [language, clearSilenceTimer, cleanupAudio, startListening]);
+  }, [language, stopRecognition, startRecognition]);
 
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
-      clearSilenceTimer();
-      if (recognitionRef.current) {
+      clearTimers();
+      stopRecognition();
+      if (vadRef.current) {
         try {
-          recognitionRef.current.abort();
+          vadRef.current.pause();
+          vadRef.current.destroy();
         } catch {}
+        vadRef.current = null;
       }
-      cleanupAudio();
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
     };
-  }, [clearSilenceTimer, cleanupAudio]);
+  }, [clearTimers, stopRecognition]);
 
   return {
     isListening,
@@ -342,5 +363,7 @@ export function useVoice({
     isSpeaking,
     stopSpeaking,
     audioLevel,
+    vadReady,
+    userSpeaking,
   };
 }

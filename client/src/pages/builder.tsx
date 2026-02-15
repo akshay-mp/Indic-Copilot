@@ -43,8 +43,6 @@ export default function Builder({ conversationId, onConversationCreated }: Build
     language,
     onResult: handleVoiceResult,
     onAutoSend: handleAutoSend,
-    vadEnabled: true,
-    silenceTimeout: 1800,
   });
 
   const { data: conversation, isLoading: loadingConversation } = useQuery<Conversation & { messages: Message[] }>({
@@ -185,16 +183,22 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                 onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
                 onStopSpeaking={voice.stopSpeaking}
                 audioLevel={voice.audioLevel}
+                userSpeaking={voice.userSpeaking}
                 size="lg"
               />
               {voice.isListening && (
                 <p className="text-sm text-primary animate-pulse" data-testid="text-listening">
-                  {voice.interimTranscript || inputText || "Listening... speak now"}
+                  {voice.interimTranscript || inputText || (voice.vadReady ? "Listening... speak now" : "Initializing voice detection...")}
                 </p>
               )}
-              {voice.isListening && inputText && (
+              {voice.isListening && voice.userSpeaking && (
                 <p className="text-xs text-muted-foreground" data-testid="text-vad-status">
-                  Will auto-send when you stop speaking
+                  Speaking detected - will auto-send when you pause
+                </p>
+              )}
+              {voice.isListening && !voice.userSpeaking && inputText && (
+                <p className="text-xs text-muted-foreground" data-testid="text-vad-status">
+                  Auto-sending shortly...
                 </p>
               )}
               {!voice.isSupported && (
@@ -256,6 +260,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
               onToggleListening={voice.isListening ? voice.stopListening : voice.startListening}
               onStopSpeaking={voice.stopSpeaking}
               audioLevel={voice.audioLevel}
+              userSpeaking={voice.userSpeaking}
             />
             <Textarea
               ref={textareaRef}

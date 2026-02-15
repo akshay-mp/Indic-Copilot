@@ -1,4 +1,4 @@
-import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Mic, MicOff, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ interface VoiceButtonProps {
   onStopSpeaking: () => void;
   audioLevel?: number;
   size?: "default" | "lg";
+  userSpeaking?: boolean;
 }
 
 export function VoiceButton({
@@ -20,6 +21,7 @@ export function VoiceButton({
   onStopSpeaking,
   audioLevel = 0,
   size = "default",
+  userSpeaking = false,
 }: VoiceButtonProps) {
   if (isSpeaking) {
     return (
@@ -39,7 +41,7 @@ export function VoiceButton({
     );
   }
 
-  const ringScale = isListening ? 1 + audioLevel * 0.6 : 1;
+  const ringScale = isListening ? 1 + audioLevel * 0.5 : 1;
 
   return (
     <Button
@@ -50,7 +52,8 @@ export function VoiceButton({
       className={cn(
         "relative transition-all",
         size === "lg" && "w-14 h-14",
-        isListening && "ring-4 ring-primary/30"
+        isListening && !userSpeaking && "ring-4 ring-primary/20",
+        isListening && userSpeaking && "ring-4 ring-green-500/40"
       )}
       data-testid="button-voice"
     >
@@ -59,11 +62,14 @@ export function VoiceButton({
       ) : (
         <Mic className={cn("w-5 h-5", size === "lg" && "w-6 h-6")} />
       )}
-      {isListening && (
+      {isListening && userSpeaking && (
         <span
-          className="absolute inset-0 rounded-md bg-primary/20 transition-transform duration-100"
+          className="absolute inset-0 rounded-md bg-green-500/20 transition-transform duration-150"
           style={{ transform: `scale(${ringScale})` }}
         />
+      )}
+      {isListening && !userSpeaking && (
+        <span className="absolute inset-0 rounded-md bg-primary/10 animate-pulse" />
       )}
     </Button>
   );
