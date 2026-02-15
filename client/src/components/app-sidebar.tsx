@@ -74,7 +74,7 @@ export function AppSidebar({
         <div className="flex items-center gap-2">
           <span className="text-2xl">🇮🇳</span>
           <div>
-            <h1 className="text-sm font-semibold">Indian</h1>
+            <h1 className="text-sm font-semibold">Indic Copilot</h1>
             <p className="text-xs text-muted-foreground">AI App Builder</p>
           </div>
         </div>

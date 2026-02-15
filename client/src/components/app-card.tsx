@@ -83,7 +83,7 @@ export function AppCard({ app, onOpen, onDelete }: AppCardProps) {
   };
 
   const shareWhatsApp = () => {
-    const text = `Check out "${app.title}" - built with Indian!\n${shareUrl}`;
+    const text = `Check out "${app.title}" - built with Indic Copilot!\n${shareUrl}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
 

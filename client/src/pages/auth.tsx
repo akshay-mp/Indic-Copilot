@@ -48,7 +48,7 @@ export default function AuthPage() {
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2">
             <span className="text-3xl">🇮🇳</span>
-            <h1 className="text-2xl font-bold" data-testid="text-app-title">Indian</h1>
+            <h1 className="text-2xl font-bold" data-testid="text-app-title">Indic Copilot</h1>
           </div>
           <p className="text-sm text-muted-foreground">
             Build apps with your voice in any Indian language
