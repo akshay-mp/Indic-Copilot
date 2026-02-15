@@ -17,9 +17,10 @@ import type { Conversation, Message } from "@shared/schema";
 interface BuilderProps {
   conversationId: number | null;
   onConversationCreated: (id: number) => void;
+  onNavigateToDashboard?: () => void;
 }
 
-export default function Builder({ conversationId, onConversationCreated }: BuilderProps) {
+export default function Builder({ conversationId, onConversationCreated, onNavigateToDashboard }: BuilderProps) {
   const [language, setLanguage] = useState("en-US");
   const [inputText, setInputText] = useState("");
   const [streamingContent, setStreamingContent] = useState("");
@@ -285,6 +286,7 @@ export default function Builder({ conversationId, onConversationCreated }: Build
                   content={msg.content}
                   onSpeak={msg.role === "assistant" ? (text) => voice.speak(text) : undefined}
                   isSpeaking={voice.isSpeaking}
+                  onViewDashboard={onNavigateToDashboard}
                 />
               ))
             )}

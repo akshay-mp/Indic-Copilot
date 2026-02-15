@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Bot, User, Volume2, Code } from "lucide-react";
+import { Bot, User, Volume2, Code, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ interface ChatMessageProps {
   content: string;
   onSpeak?: (text: string) => void;
   isSpeaking?: boolean;
+  onViewDashboard?: () => void;
 }
 
 function isHtmlContent(content: string): boolean {
@@ -22,7 +23,7 @@ function isHtmlContent(content: string): boolean {
   );
 }
 
-export function ChatMessage({ role, content, onSpeak, isSpeaking }: ChatMessageProps) {
+export function ChatMessage({ role, content, onSpeak, isSpeaking, onViewDashboard }: ChatMessageProps) {
   const isUser = role === "user";
   const isHtml = !isUser && isHtmlContent(content);
 
@@ -35,14 +36,26 @@ export function ChatMessage({ role, content, onSpeak, isSpeaking }: ChatMessageP
           </AvatarFallback>
         </Avatar>
         <Card className="flex-1 p-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <Code className="w-4 h-4 text-primary" />
             <span className="text-sm font-medium">App Generated</span>
             <Badge variant="secondary">HTML</Badge>
           </div>
-          <p className="text-xs text-muted-foreground">
-            The app code has been generated and saved. View it in the Dashboard.
+          <p className="text-xs text-muted-foreground mb-3">
+            Your app has been built successfully!
           </p>
+          {onViewDashboard && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onViewDashboard}
+              className="gap-1"
+              data-testid="button-view-dashboard"
+            >
+              <ExternalLink className="w-3 h-3" />
+              View in Dashboard
+            </Button>
+          )}
         </Card>
       </div>
     );

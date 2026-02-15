@@ -60,6 +60,7 @@ function AppContent() {
               <Builder
                 conversationId={activeConversationId}
                 onConversationCreated={handleConversationCreated}
+                onNavigateToDashboard={() => handleNavigate("dashboard")}
               />
             )}
             {activePage === "dashboard" && (

@@ -1,6 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { db } from "./db";
+import { generatedApps } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import WebSocket from "ws";
 
@@ -9,6 +12,35 @@ const anthropic = new Anthropic({
   apiKey: process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
 });
+
+function mergeMultiFileWebApp(response: string): string | null {
+  const fileRegex = /<file\s+path="([^"]*)">\s*([\s\S]*?)<\/file>/g;
+  const files: Record<string, string> = {};
+  let match;
+  while ((match = fileRegex.exec(response)) !== null) {
+    files[match[1]] = match[2].trim();
+  }
+
+  const htmlFile = files["index.html"] || Object.entries(files).find(([k]) => k.endsWith(".html"))?.[1];
+  if (!htmlFile || (!htmlFile.includes("<html") && !htmlFile.includes("<!DOCTYPE"))) {
+    return null;
+  }
+
+  let merged = htmlFile;
+
+  for (const [path, content] of Object.entries(files)) {
+    if (path.endsWith(".css")) {
+      const linkPattern = new RegExp(`<link[^>]*href=["']${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*/?>`, "gi");
+      merged = merged.replace(linkPattern, `<style>\n${content}\n</style>`);
+    }
+    if (path.endsWith(".js")) {
+      const scriptPattern = new RegExp(`<script[^>]*src=["']${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>\\s*</script>`, "gi");
+      merged = merged.replace(scriptPattern, `<script>\n${content}\n</script>`);
+    }
+  }
+
+  return merged;
+}
 
 function extractHtmlFromResponse(response: string): string | null {
   const trimmed = response.trim();
@@ -30,20 +62,9 @@ function extractHtmlFromResponse(response: string): string | null {
     }
   }
 
-  const webAppMatch = response.match(/<web_app>\s*<file\s+path="index\.html">\s*([\s\S]*?)<\/file>/);
-  if (webAppMatch) {
-    const extracted = webAppMatch[1].trim();
-    if (extracted.includes("<html") || extracted.includes("<!DOCTYPE")) {
-      return extracted;
-    }
-  }
-
-  const fileMatch = response.match(/<file\s+path="[^"]*\.html">\s*([\s\S]*?)<\/file>/);
-  if (fileMatch) {
-    const extracted = fileMatch[1].trim();
-    if (extracted.includes("<html") || extracted.includes("<!DOCTYPE")) {
-      return extracted;
-    }
+  if (response.includes("<web_app>") || response.includes("<file ")) {
+    const merged = mergeMultiFileWebApp(response);
+    if (merged) return merged;
   }
 
   const doctypeIdx = response.indexOf("<!DOCTYPE");
@@ -223,6 +244,7 @@ export async function registerRoutes(
       let shouldBuildApp = false;
 
       if (isApproval && hasPlan) {
+        console.log(`[BUILD] Approval detected for conversation ${conversationId}, triggering build phase`);
         systemPrompt = SYSTEM_PROMPT_BUILD(langName);
         shouldBuildApp = true;
         await storage.updateConversation(conversationId, { phase: "building" });
@@ -266,6 +288,7 @@ export async function registerRoutes(
 
       if (shouldBuildApp) {
         let htmlContent = extractHtmlFromResponse(fullResponse);
+        console.log(`[BUILD] HTML extraction result: ${htmlContent ? `success (${htmlContent.length} chars)` : "FAILED"}`);
 
         if (htmlContent) {
           const titleMatch = htmlContent.match(/<title>(.*?)<\/title>/i);
@@ -294,6 +317,44 @@ export async function registerRoutes(
       } else {
         res.status(500).json({ error: "Failed to process message" });
       }
+    }
+  });
+
+  // --- Recover apps from messages that contain HTML but were never saved ---
+  app.post("/api/apps/recover", async (_req, res) => {
+    try {
+      const allConvs = await storage.getAllConversations();
+      let recovered = 0;
+
+      for (const conv of allConvs) {
+        const existingApps = await db.select().from(generatedApps).where(eq(generatedApps.conversationId, conv.id));
+        if (existingApps.length > 0) continue;
+
+        const msgs = await storage.getMessagesByConversation(conv.id);
+        for (const msg of msgs) {
+          if (msg.role !== "assistant") continue;
+          const html = extractHtmlFromResponse(msg.content);
+          if (html) {
+            const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+            const appTitle = titleMatch ? titleMatch[1] : conv.title;
+            await storage.createApp({
+              conversationId: conv.id,
+              title: appTitle,
+              description: conv.title,
+              htmlContent: html,
+              language: conv.language,
+            });
+            await storage.updateConversation(conv.id, { phase: "completed" });
+            recovered++;
+            break;
+          }
+        }
+      }
+
+      res.json({ recovered, message: `Recovered ${recovered} apps from existing conversations.` });
+    } catch (error) {
+      console.error("Recovery error:", error);
+      res.status(500).json({ error: "Failed to recover apps" });
     }
   });
 
