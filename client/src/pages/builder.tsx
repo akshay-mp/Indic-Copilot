@@ -235,9 +235,13 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
     sendMessageRef.current = sendMessage;
   }, [sendMessage]);
 
+  const prevConversationIdRef = useRef<number | null>(conversationId);
   useEffect(() => {
-    setVoiceMode(false);
-    return () => {
+    const prev = prevConversationIdRef.current;
+    prevConversationIdRef.current = conversationId;
+
+    const switchedAway = prev !== null && prev !== conversationId;
+    if (switchedAway) {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
         abortControllerRef.current = null;
@@ -247,11 +251,12 @@ export default function Builder({ conversationId, onConversationCreated, onNavig
         if (v.isListening) v.stopListening();
         if (v.isSpeaking) v.stopSpeaking();
       }
+      setVoiceMode(false);
       setIsStreaming(false);
       setIsBuildingApp(false);
       setPendingSend(false);
       setStreamingContent("");
-    };
+    }
   }, [conversationId]);
 
   const handleSubmit = () => {
