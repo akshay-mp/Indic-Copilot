@@ -272,17 +272,17 @@ export async function registerRoutes(
       const langName = getLanguageName(activeLanguage);
 
       const approvalWords = [
-        "yes", "approve", "build it", "go ahead", "okay", "sure", "do it",
-        "haan", "theek hai", "chalo", "banao",
-        "ಹೌದು", "ಸರಿ", "ಮಾಡು", "ಮಾಡಿ", "ಶುರು ಮಾಡಿ",
-        "சரி", "ஆமா", "செய்யுங்கள்",
-        "అవును", "సరి", "చేయండి",
-        "ശരി", "ചെയ്യൂ",
-        "हां", "हाँ", "करो", "बनाओ", "ठीक है",
-        "হ্যাঁ", "করো",
-        "હા", "કરો",
-        "ਹਾਂ", "ਕਰੋ",
-        "ହଁ",
+        "yes", "approve", "build it", "go ahead", "okay", "sure", "do it", "let's go", "start",
+        "haan", "theek hai", "chalo", "banao", "shuru karo", "ho jayega",
+        "ಹೌದು", "ಸರಿ", "ಮಾಡು", "ಮಾಡಿ", "ಶುರು ಮಾಡಿ", "ಒಪ್ಪುತ್ತೇನೆ", "ಹೋಗುತ್ತೇನೆ", "ಮುಂದುವರಿ", "ಆಗಲಿ", "ಮಾಡಿಕೊಡಿ",
+        "சரி", "ஆமா", "செய்யுங்கள்", "தொடங்கு",
+        "అవును", "సరి", "చేయండి", "మొదలు పెట్టండి",
+        "ശരി", "ചെയ്യൂ", "തുടങ്ങൂ",
+        "हां", "हाँ", "करो", "बनाओ", "ठीक है", "शुरू करो", "चलो",
+        "হ্যাঁ", "করো", "শুরু করো",
+        "હા", "કરો", "શરૂ કરો",
+        "ਹਾਂ", "ਕਰੋ", "ਸ਼ੁਰੂ ਕਰੋ",
+        "ହଁ", "କର",
       ];
       const contentLower = content.trim().toLowerCase();
       const isApproval = approvalWords.some(w => {
@@ -308,7 +308,7 @@ export async function registerRoutes(
         systemPrompt = SYSTEM_PROMPT_PLANNING(langName);
       }
 
-      const chatMessages = existingMessages.map((m) => ({
+      let chatMessages = existingMessages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
@@ -319,6 +319,10 @@ export async function registerRoutes(
 
       if (shouldBuildApp) {
         res.write(`data: ${JSON.stringify({ phase: "building" })}\n\n`);
+        chatMessages.push({
+          role: "user" as const,
+          content: "The user has approved the plan. Now generate the complete app as a single HTML file. Start your response with <!DOCTYPE html> immediately. Do NOT include any text, explanation, or markdown — output ONLY the HTML code.",
+        });
       }
 
       const stream = anthropic.messages.stream({
@@ -361,6 +365,9 @@ export async function registerRoutes(
 
           await storage.updateConversation(conversationId, { phase: "completed" });
           res.write(`data: ${JSON.stringify({ appCreated: true, appId: app.id })}\n\n`);
+        } else {
+          console.log(`[BUILD] HTML extraction failed, resetting conversation ${conversationId} to planning phase`);
+          await storage.updateConversation(conversationId, { phase: "planning" });
         }
       }
 
