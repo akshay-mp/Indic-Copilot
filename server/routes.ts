@@ -755,6 +755,10 @@ export async function registerRoutes(
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: "messages array required" });
       }
+      
+      // Ensure language has a default if missing
+      const appLanguage = language || "kn-IN";
+
       if (messages.length > 20) {
         return res.status(400).json({ error: "Too many messages (max 20)" });
       }
@@ -811,7 +815,7 @@ export async function registerRoutes(
       const response = await anthropic.messages.create({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 4096,
-        system: system ? String(system) : _buildAppAISystemPrompt(language),
+        system: system ? String(system) : _buildAppAISystemPrompt(appLanguage),
         messages: anthropicMessages,
       });
 
