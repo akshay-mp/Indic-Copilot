@@ -328,7 +328,7 @@ export async function registerRoutes(
       const audioChunks: Buffer[] = [];
 
       await new Promise<void>((resolve, reject) => {
-        const wsUrl = `wss://api.sarvam.ai/text-to-speech/ws`;
+        const wsUrl = `wss://api.sarvam.ai/text-to-speech/ws?model=bulbul:v2&send_completion_event=true`;
         const ws = new WebSocket(wsUrl, {
           headers: { "Api-Subscription-Key": apiKey },
         });
@@ -339,17 +339,19 @@ export async function registerRoutes(
         }, 30000);
 
         ws.on("open", () => {
-          ws.send(JSON.stringify({
+          const configMsg = {
             type: "config",
             data: {
               target_language_code: targetLang,
               speaker: "meera",
-              model: "bulbul:v2",
-              output_audio_codec: "mp3",
-              sample_rate: 22050,
               pace: 1.0,
+              output_audio_codec: "mp3",
+              min_buffer_size: 50,
+              max_chunk_length: 200,
             },
-          }));
+          };
+          console.log("Sarvam TTS: sending config:", JSON.stringify(configMsg));
+          ws.send(JSON.stringify(configMsg));
 
           const chunks = text.match(/.{1,300}/g) || [text];
           for (const chunk of chunks) {
@@ -360,18 +362,24 @@ export async function registerRoutes(
         });
 
         ws.on("message", (data: WebSocket.Data) => {
+          if (Buffer.isBuffer(data) || data instanceof ArrayBuffer) {
+            audioChunks.push(Buffer.from(data as ArrayBuffer));
+            return;
+          }
           try {
             const msg = JSON.parse(data.toString());
             if (msg.type === "audio" && msg.data?.audio) {
               audioChunks.push(Buffer.from(msg.data.audio, "base64"));
-            } else if (msg.type === "completion") {
+            } else if (msg.type === "event" && msg.data?.event_type === "final") {
               clearTimeout(timeout);
               ws.close();
               resolve();
             } else if (msg.type === "error") {
               clearTimeout(timeout);
               ws.close();
-              reject(new Error(msg.data?.message || "Sarvam TTS error"));
+              const errMsg = msg.data?.message || msg.message || "Sarvam TTS error";
+              console.error("Sarvam TTS error:", errMsg);
+              reject(new Error(errMsg));
             }
           } catch {}
         });
