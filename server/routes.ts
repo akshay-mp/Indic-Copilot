@@ -10,6 +10,56 @@ const anthropic = new Anthropic({
   baseURL: process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL,
 });
 
+function extractHtmlFromResponse(response: string): string | null {
+  const trimmed = response.trim();
+
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+    return trimmed;
+  }
+
+  const htmlCodeBlock = response.match(/```html\s*([\s\S]*?)```/);
+  if (htmlCodeBlock) {
+    return htmlCodeBlock[1].trim();
+  }
+
+  const anyCodeBlock = response.match(/```\s*([\s\S]*?)```/);
+  if (anyCodeBlock) {
+    const code = anyCodeBlock[1].trim();
+    if (code.includes("<html") || code.includes("<!DOCTYPE")) {
+      return code;
+    }
+  }
+
+  const webAppMatch = response.match(/<web_app>\s*<file\s+path="index\.html">\s*([\s\S]*?)<\/file>/);
+  if (webAppMatch) {
+    const extracted = webAppMatch[1].trim();
+    if (extracted.includes("<html") || extracted.includes("<!DOCTYPE")) {
+      return extracted;
+    }
+  }
+
+  const fileMatch = response.match(/<file\s+path="[^"]*\.html">\s*([\s\S]*?)<\/file>/);
+  if (fileMatch) {
+    const extracted = fileMatch[1].trim();
+    if (extracted.includes("<html") || extracted.includes("<!DOCTYPE")) {
+      return extracted;
+    }
+  }
+
+  const doctypeIdx = response.indexOf("<!DOCTYPE");
+  const htmlIdx = response.indexOf("<html");
+  const startIdx = doctypeIdx >= 0 ? doctypeIdx : htmlIdx;
+  if (startIdx >= 0) {
+    const htmlEndMatch = response.indexOf("</html>", startIdx);
+    if (htmlEndMatch >= 0) {
+      return response.substring(startIdx, htmlEndMatch + 7).trim();
+    }
+    return response.substring(startIdx).trim();
+  }
+
+  return null;
+}
+
 function getLanguageName(code: string): string {
   const map: Record<string, string> = {
     "kn-IN": "Kannada", "hi-IN": "Hindi", "ta-IN": "Tamil", "te-IN": "Telugu",
@@ -36,22 +86,25 @@ Keep responses concise and conversational - this is a voice-first interface desi
 
 const SYSTEM_PROMPT_BUILD = (lang: string) => `You are VoiceForge, an AI app builder. The user has approved the app plan. Now generate the complete app.
 
+CRITICAL OUTPUT FORMAT: Your entire response must be ONLY a single HTML file. Start your response with <!DOCTYPE html> and end with </html>. Do NOT include any text before or after the HTML. Do NOT use markdown code blocks. Do NOT wrap in <web_app>, <file>, or any other tags. Do NOT generate multiple files.
+
 Generate a SINGLE, complete, self-contained HTML file that includes:
 - All HTML structure
-- CSS styles (inline or in <style> tags) - make it modern, beautiful, and responsive
-- JavaScript functionality (in <script> tags)
+- All CSS styles in a single <style> tag inside <head>
+- All JavaScript in a single <script> tag before </body>
 - Use modern CSS (flexbox, grid, custom properties)
 - Make it mobile-responsive
 - Use a clean, professional color scheme
 - Include realistic placeholder content
 - Make all interactive elements functional
+- Use localStorage for any data persistence
 
 The HTML must be completely self-contained with NO external dependencies.
 Do NOT use any CDN links or external resources.
 
-Return ONLY the HTML code, nothing else. No explanations, no markdown code blocks, just raw HTML.
+CRITICAL: All user-facing text, labels, buttons, headings, placeholder content, and descriptions in the generated app MUST be in ${lang}. Do not use English text unless ${lang} is English.
 
-CRITICAL: All user-facing text, labels, buttons, headings, placeholder content, and descriptions in the generated app MUST be in ${lang}. Do not use English text unless ${lang} is English.`;
+Remember: Output ONLY the raw HTML starting with <!DOCTYPE html>. Nothing else.`;
 
 const SYSTEM_PROMPT_PLANT = (lang: string) => `You are a plant disease expert. Analyze the plant image provided and give a detailed diagnosis.
 
@@ -141,7 +194,28 @@ export async function registerRoutes(
       const existingMessages = await storage.getMessagesByConversation(conversationId);
       const langName = getLanguageName(activeLanguage);
 
-      const isApproval = /\b(yes|approve|build|go ahead|haan|hā|hoon|ಹೌದು|oo|சரி|అవును|ശരി|हो|হ্যাঁ|હા|ਹਾਂ)\b/i.test(content);
+      const approvalWords = [
+        "yes", "approve", "build it", "go ahead", "okay", "sure", "do it",
+        "haan", "theek hai", "chalo", "banao",
+        "ಹೌದು", "ಸರಿ", "ಮಾಡು", "ಮಾಡಿ", "ಶುರು ಮಾಡಿ",
+        "சரி", "ஆமா", "செய்யுங்கள்",
+        "అవును", "సరి", "చేయండి",
+        "ശരി", "ചെയ്യൂ",
+        "हां", "हाँ", "करो", "बनाओ", "ठीक है",
+        "হ্যাঁ", "করো",
+        "હા", "કરો",
+        "ਹਾਂ", "ਕਰੋ",
+        "ହଁ",
+      ];
+      const contentLower = content.trim().toLowerCase();
+      const isApproval = approvalWords.some(w => {
+        const word = w.toLowerCase();
+        if (/^[a-z\s]+$/.test(word)) {
+          const regex = new RegExp(`\\b${word}\\b`, "i");
+          return regex.test(contentLower);
+        }
+        return contentLower.includes(word);
+      });
       const assistantMessages = existingMessages.filter(m => m.role === "assistant");
       const hasPlan = assistantMessages.length >= 2 && conv.phase === "planning";
 
@@ -191,16 +265,9 @@ export async function registerRoutes(
       await storage.createMessage({ conversationId, role: "assistant", content: fullResponse });
 
       if (shouldBuildApp) {
-        let htmlContent = fullResponse;
-        const htmlMatch = fullResponse.match(/```html\s*([\s\S]*?)```/);
-        if (htmlMatch) {
-          htmlContent = htmlMatch[1].trim();
-        } else if (!fullResponse.trim().startsWith("<!DOCTYPE") && !fullResponse.trim().startsWith("<html")) {
-          const codeMatch = fullResponse.match(/```\s*([\s\S]*?)```/);
-          if (codeMatch) htmlContent = codeMatch[1].trim();
-        }
+        let htmlContent = extractHtmlFromResponse(fullResponse);
 
-        if (htmlContent.includes("<html") || htmlContent.includes("<!DOCTYPE") || htmlContent.includes("<body")) {
+        if (htmlContent) {
           const titleMatch = htmlContent.match(/<title>(.*?)<\/title>/i);
           const appTitle = titleMatch ? titleMatch[1] : conv.title;
 

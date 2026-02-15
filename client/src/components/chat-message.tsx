@@ -17,7 +17,8 @@ function isHtmlContent(content: string): boolean {
   return (
     trimmed.startsWith("<!DOCTYPE") ||
     trimmed.startsWith("<html") ||
-    (trimmed.includes("<html") && trimmed.includes("<body") && trimmed.includes("<head"))
+    (trimmed.includes("<html") && trimmed.includes("<body") && trimmed.includes("<head")) ||
+    (trimmed.includes("<web_app>") && trimmed.includes("<file"))
   );
 }
 
