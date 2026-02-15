@@ -38,7 +38,7 @@ export default function SharedAppPage({ shareId }: SharedAppPageProps) {
         <p className="text-muted-foreground">This shared app may have been removed or the link is invalid.</p>
         <Button variant="outline" onClick={() => (window.location.href = "/")} data-testid="button-go-home">
           <ArrowLeft className="w-4 h-4 mr-2" />
-          Go to Indic Copilot
+          Go to Indian
         </Button>
       </div>
     );
@@ -68,14 +68,14 @@ export default function SharedAppPage({ shareId }: SharedAppPageProps) {
       <header className="flex items-center justify-between gap-2 p-3 border-b">
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="font-semibold text-sm truncate" data-testid="text-shared-app-title">{app.title}</h1>
-          <span className="text-xs text-muted-foreground">via Indic Copilot</span>
+          <span className="text-xs text-muted-foreground">via Indian</span>
         </div>
         <div className="flex items-center gap-2">
           <Button size="icon" variant="ghost" onClick={() => setFullscreen(true)} data-testid="button-fullscreen">
             <Maximize2 className="w-4 h-4" />
           </Button>
           <Button variant="outline" onClick={() => (window.location.href = "/")} data-testid="button-try-copilot">
-            Try Indic Copilot
+            Try Indian
           </Button>
         </div>
       </header>

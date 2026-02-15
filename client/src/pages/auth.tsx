@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Mic } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export default function AuthPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -47,10 +47,8 @@ export default function AuthPage() {
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2">
-            <div className="w-10 h-10 rounded-md bg-primary flex items-center justify-center">
-              <Mic className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <h1 className="text-2xl font-bold" data-testid="text-app-title">Indic Copilot</h1>
+            <span className="text-3xl">🇮🇳</span>
+            <h1 className="text-2xl font-bold" data-testid="text-app-title">Indian</h1>
           </div>
           <p className="text-sm text-muted-foreground">
             Build apps with your voice in any Indian language

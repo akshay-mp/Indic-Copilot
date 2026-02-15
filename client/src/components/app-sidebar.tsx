@@ -14,7 +14,7 @@ import {
   SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Sparkles, LayoutGrid, MessageSquare, Plus, Trash2, LogOut } from "lucide-react";
+import { LayoutGrid, MessageSquare, Plus, Trash2, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import type { Conversation } from "@shared/schema";
@@ -72,11 +72,9 @@ export function AppSidebar({
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-primary-foreground" />
-          </div>
+          <span className="text-2xl">🇮🇳</span>
           <div>
-            <h1 className="text-sm font-semibold">Indic Copilot</h1>
+            <h1 className="text-sm font-semibold">Indian</h1>
             <p className="text-xs text-muted-foreground">AI App Builder</p>
           </div>
         </div>
