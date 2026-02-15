@@ -49,7 +49,7 @@ export function useVoice({
   const speechEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startRecognitionRef = useRef<() => void>(() => {});
+  const startRecognitionRef = useRef<() => void>(() => { });
 
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
@@ -100,7 +100,7 @@ export function useVoice({
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
-      } catch {}
+      } catch { }
       recognitionRef.current = null;
     }
   }, []);
@@ -212,7 +212,7 @@ export function useVoice({
           r.onend = recognition.onend;
           recognitionRef.current = r;
           r.start();
-        } catch {}
+        } catch { }
       }
     };
 
@@ -249,7 +249,7 @@ export function useVoice({
       try {
         vadRef.current.pause();
         vadRef.current.destroy();
-      } catch {}
+      } catch { }
       vadRef.current = null;
     }
 
@@ -370,7 +370,7 @@ export function useVoice({
 
   const prepareForSpeaking = useCallback(() => {
     if (vadRef.current && isActiveRef.current) {
-      try { vadRef.current.pause(); } catch {}
+      try { vadRef.current.pause(); } catch { }
     }
     stopRecognition();
     clearTimers();
@@ -379,7 +379,7 @@ export function useVoice({
   const resumeAfterSpeaking = useCallback(() => {
     setIsSpeaking(false);
     if (vadRef.current && isActiveRef.current) {
-      try { vadRef.current.start(); } catch {}
+      try { vadRef.current.start(); } catch { }
       startRecognitionRef.current();
     } else if (isActiveRef.current) {
       startRecognitionRef.current();
@@ -396,7 +396,7 @@ export function useVoice({
       audioContextRef.current = new AudioContext();
     }
     if (audioContextRef.current.state === "suspended") {
-      audioContextRef.current.resume().catch(() => {});
+      audioContextRef.current.resume().catch(() => { });
     }
     return audioContextRef.current;
   }, []);
@@ -405,11 +405,11 @@ export function useVoice({
     const unlockAudio = () => {
       const ctx = getAudioContext();
       if (ctx.state === "suspended") {
-        ctx.resume().catch(() => {});
+        ctx.resume().catch(() => { });
       }
       const silent = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
       silent.volume = 0;
-      silent.play().then(() => silent.pause()).catch(() => {});
+      silent.play().then(() => silent.pause()).catch(() => { });
     };
     document.addEventListener("click", unlockAudio, { once: false });
     document.addEventListener("touchstart", unlockAudio, { once: false });
@@ -438,13 +438,18 @@ export function useVoice({
         return false;
       }
 
+      const contentType = response.headers.get("content-type") || "unknown";
       const arrayBuffer = await response.arrayBuffer();
       if (arrayBuffer.byteLength === 0) {
         console.warn("Sarvam TTS: empty audio response");
         return false;
       }
+      console.log("Sarvam TTS: received", arrayBuffer.byteLength, "bytes, content-type:", contentType);
 
       const ctx = getAudioContext();
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
       try {
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
         return new Promise<boolean>((resolve) => {
@@ -457,7 +462,7 @@ export function useVoice({
           };
           source.start(0);
           console.log("Sarvam TTS: playing audio via Web Audio API, duration:", audioBuffer.duration.toFixed(1), "s");
-          sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch {} } } as any;
+          sarvamAudioRef.current = { pause: () => { try { source.stop(); } catch { } } } as any;
         });
       } catch (decodeErr) {
         console.warn("Sarvam TTS: Web Audio decode failed, trying HTMLAudioElement", decodeErr);
@@ -601,7 +606,7 @@ export function useVoice({
         try {
           vadRef.current.pause();
           vadRef.current.destroy();
-        } catch {}
+        } catch { }
         vadRef.current = null;
       }
       if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -613,7 +618,7 @@ export function useVoice({
       }
       speakingGuardRef.current = false;
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current.close().catch(() => { });
         audioContextRef.current = null;
       }
     };

@@ -335,6 +335,7 @@ export async function registerRoutes(
           target_language_code: targetLang,
           speaker: "shubh",
           model: "bulbul:v3",
+          output_audio_codec: "wav",
         }),
       });
 
