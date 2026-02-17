@@ -41,7 +41,9 @@ export function useVoice({
   const [userSpeaking, setUserSpeaking] = useState(false);
 
   const vadRef = useRef<any>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const isActiveRef = useRef(false);
   const accumulatedTextRef = useRef("");
@@ -49,7 +51,7 @@ export function useVoice({
   const speechEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startRecognitionRef = useRef<() => void>(() => { });
+  const isRecordingRef = useRef(false);
 
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
@@ -78,9 +80,12 @@ export function useVoice({
     }
   }, []);
 
+  // MediaRecorder is universally supported in modern browsers
   const isSupported =
     typeof window !== "undefined" &&
-    ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== "undefined";
 
   const clearTimers = useCallback(() => {
     if (speechEndTimerRef.current) {
@@ -97,18 +102,48 @@ export function useVoice({
     }
   }, []);
 
-  const stopRecognition = useCallback(() => {
-    if (recognitionRef.current) {
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try {
-        recognitionRef.current.abort();
-      } catch { }
-      recognitionRef.current = null;
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        console.warn("Failed to stop MediaRecorder:", e);
+      }
+    }
+    isRecordingRef.current = false;
+  }, []);
+
+  const sendAudioToSTT = useCallback(async (audioBlob: Blob) => {
+    try {
+      console.log("[STT Client] Sending audio to server:", audioBlob.size, "bytes");
+
+      const formData = new FormData();
+      formData.append("file", audioBlob, "recording.webm");
+      formData.append("language", languageRef.current);
+      formData.append("mode", "transcribe");
+
+      const response = await fetch("/api/stt", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Unknown error" }));
+        console.error("[STT Client] Server error:", error);
+        return null;
+      }
+
+      const data = await response.json() as { transcript: string };
+      console.log("[STT Client] Received transcript:", data.transcript);
+      return data.transcript;
+    } catch (error) {
+      console.error("[STT Client] Failed to send audio:", error);
+      return null;
     }
   }, []);
 
-  const doAutoSend = useCallback((restartAfter: boolean) => {
-    const finalText = accumulatedTextRef.current.trim();
-    if (finalText && hasSpeechRef.current) {
+  const doAutoSend = useCallback((finalText: string) => {
+    if (finalText && finalText.trim()) {
       accumulatedTextRef.current = "";
       hasSpeechRef.current = false;
       setTranscript("");
@@ -116,149 +151,84 @@ export function useVoice({
       setUserSpeaking(false);
       setAudioLevel(0.05);
 
-      stopRecognition();
-
       if (onAutoSendRef.current) {
-        onAutoSendRef.current(finalText);
-      }
-
-      if (restartAfter && isActiveRef.current) {
-        setTimeout(() => {
-          if (isActiveRef.current) {
-            startRecognitionRef.current();
-          }
-        }, 500);
+        onAutoSendRef.current(finalText.trim());
       }
     }
-  }, [stopRecognition]);
+  }, []);
 
-  const resetSilenceTimer = useCallback(() => {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
-    if (hasSpeechRef.current && isActiveRef.current) {
-      silenceTimerRef.current = setTimeout(() => {
-        silenceTimerRef.current = null;
-        if (isActiveRef.current && hasSpeechRef.current) {
-          doAutoSend(true);
-        }
-      }, 1500);
-    }
-  }, [doAutoSend]);
+  // Removed resetSilenceTimer - no longer needed with MediaRecorder approach
 
-  const startRecognition = useCallback(() => {
-    if (!isSupported) return;
-    stopRecognition();
+  const startRecording = useCallback(() => {
+    if (!mediaStreamRef.current || isRecordingRef.current) return;
 
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-
-    recognition.lang = languageRef.current;
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      if (!isActiveRef.current) return;
-
-      let allFinal = "";
-      let currentInterim = "";
-
-      for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          allFinal += result[0].transcript;
-        } else {
-          currentInterim += result[0].transcript;
-        }
-      }
-
-      if (allFinal) {
-        accumulatedTextRef.current = allFinal;
-        hasSpeechRef.current = true;
-        setTranscript(allFinal);
-        onResultRef.current?.(allFinal);
-      }
-
-      if (currentInterim) {
-        hasSpeechRef.current = true;
-        setInterimTranscript(currentInterim);
-        setUserSpeaking(true);
-        setAudioLevel(0.7);
-        onInterimResultRef.current?.(currentInterim);
-        resetSilenceTimer();
-      } else if (hasSpeechRef.current) {
-        setInterimTranscript("");
-        resetSilenceTimer();
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      console.error("Speech recognition error:", event.error);
-    };
-
-    let restartAttempts = 0;
-    recognition.onend = () => {
-      if (isActiveRef.current) {
-        const attemptRestart = () => {
-          try {
-            const r = new SpeechRecognition();
-            r.lang = languageRef.current;
-            r.interimResults = true;
-            r.continuous = true;
-            r.maxAlternatives = 1;
-            r.onresult = recognition.onresult;
-            r.onerror = recognition.onerror;
-            r.onend = recognition.onend;
-            recognitionRef.current = r;
-            r.start();
-            restartAttempts = 0;
-          } catch (e) {
-            restartAttempts++;
-            console.warn("Recognition auto-restart failed (attempt", restartAttempts, "):", e);
-            if (restartAttempts < 3) {
-              setTimeout(attemptRestart, 500 * restartAttempts);
-            } else {
-              console.error("Recognition auto-restart failed after 3 attempts, mic may not be capturing");
-              recognitionRef.current = null;
-            }
-          }
-        };
-        attemptRestart();
-      }
-    };
-
-    recognitionRef.current = recognition;
     try {
-      recognition.start();
-    } catch (e) {
-      console.error("Failed to start speech recognition:", e);
-    }
-  }, [isSupported, stopRecognition, resetSilenceTimer]);
+      audioChunksRef.current = [];
+      const recorder = new MediaRecorder(mediaStreamRef.current, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
 
-  startRecognitionRef.current = startRecognition;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        if (audioChunksRef.current.length === 0) {
+          console.warn("[STT Client] No audio chunks recorded");
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        console.log("[STT Client] Recording stopped, blob size:", audioBlob.size);
+
+        // Send to STT API
+        const transcript = await sendAudioToSTT(audioBlob);
+
+        if (transcript) {
+          accumulatedTextRef.current = transcript;
+          hasSpeechRef.current = true;
+          setTranscript(transcript);
+          onResultRef.current?.(transcript);
+
+          // Auto-send after getting transcript
+          if (continuous && isActiveRef.current) {
+            setTimeout(() => {
+              doAutoSend(transcript);
+            }, 800);
+          }
+        }
+
+        audioChunksRef.current = [];
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      isRecordingRef.current = true;
+      console.log("[STT Client] Recording started");
+    } catch (e) {
+      console.error("[STT Client] Failed to start recording:", e);
+    }
+  }, [sendAudioToSTT, continuous, doAutoSend]);
 
   const handleSpeechEnd = useCallback(() => {
-    if (speechEndTimerRef.current) {
-      clearTimeout(speechEndTimerRef.current);
-    }
-
-    speechEndTimerRef.current = setTimeout(() => {
-      speechEndTimerRef.current = null;
-
-      if (isActiveRef.current && hasSpeechRef.current) {
-        doAutoSend(continuous);
-      }
-    }, 800);
-  }, [continuous, doAutoSend]);
+    // Stop recording when VAD detects speech end
+    stopRecording();
+  }, [stopRecording]);
 
   const stopListening = useCallback(() => {
     isActiveRef.current = false;
     clearTimers();
-    stopRecognition();
+    stopRecording();
+
+    // Close media stream
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
 
     if (vadRef.current) {
       try {
@@ -281,7 +251,7 @@ export function useVoice({
     if (finalText && onAutoSendRef.current) {
       onAutoSendRef.current(finalText);
     }
-  }, [clearTimers, stopRecognition]);
+  }, [clearTimers, stopRecording]);
 
   const startListening = useCallback(async () => {
     if (isActiveRef.current) return;
@@ -294,6 +264,11 @@ export function useVoice({
     setVadReady(false);
 
     try {
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      console.log("[STT Client] Microphone access granted");
+
       const { MicVAD } = await import("@ricky0123/vad-web");
 
       const vad = await MicVAD.new({
@@ -308,14 +283,8 @@ export function useVoice({
         onSpeechStart: () => {
           setUserSpeaking(true);
           setAudioLevel(0.7);
-          if (speechEndTimerRef.current) {
-            clearTimeout(speechEndTimerRef.current);
-            speechEndTimerRef.current = null;
-          }
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
+          // Start recording when VAD detects speech
+          startRecording();
         },
         onSpeechEnd: () => {
           setUserSpeaking(false);
@@ -330,14 +299,14 @@ export function useVoice({
 
       if (!isActiveRef.current) {
         vad.destroy();
+        stream.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
         return;
       }
 
       vadRef.current = vad;
       vad.start();
       setVadReady(true);
-
-      startRecognition();
 
       audioLevelIntervalRef.current = setInterval(() => {
         if (!isActiveRef.current) return;
@@ -347,22 +316,15 @@ export function useVoice({
         });
       }, 200);
     } catch (err) {
-      console.warn("Silero VAD not available, using fallback silence detection:", err);
-
-      if (!isActiveRef.current) return;
-
-      setVadReady(true);
-      startRecognition();
-
-      audioLevelIntervalRef.current = setInterval(() => {
-        if (!isActiveRef.current) return;
-        setAudioLevel((prev) => {
-          const target = 0.05;
-          return prev + (target - prev) * 0.3;
-        });
-      }, 200);
+      console.error("[STT Client] Failed to initialize:", err);
+      isActiveRef.current = false;
+      setIsListening(false);
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
     }
-  }, [isSupported, startRecognition, handleSpeechEnd]);
+  }, [startRecording, handleSpeechEnd]);
 
   startListeningExternalRef.current = startListening;
 
@@ -389,9 +351,9 @@ export function useVoice({
     if (vadRef.current && isActiveRef.current) {
       try { vadRef.current.pause(); } catch { }
     }
-    stopRecognition();
+    stopRecording();
     clearTimers();
-  }, [stopRecognition, clearTimers]);
+  }, [stopRecording, clearTimers]);
 
   const resumeAfterSpeaking = useCallback(() => {
     setIsSpeaking(false);
@@ -401,60 +363,38 @@ export function useVoice({
       return;
     }
 
-    let vadOk = false;
+    // Resume VAD
     if (vadRef.current) {
       try {
         vadRef.current.start();
-        vadOk = true;
         console.log("VAD resumed after speaking");
       } catch (e) {
         console.warn("VAD restart failed after speaking:", e);
-      }
-    } else {
-      console.warn("VAD ref is null after speaking, needs full re-init");
-    }
-
-    let recogOk = false;
-    try {
-      startRecognitionRef.current();
-      recogOk = true;
-      console.log("Recognition restarted after speaking");
-    } catch (e) {
-      console.warn("Recognition restart failed after speaking:", e);
-    }
-
-    if (!vadOk) {
-      console.log("VAD not available after speaking, performing full mic re-init");
-      isActiveRef.current = false;
-      clearTimers();
-      stopRecognition();
-      if (vadRef.current) {
-        try { vadRef.current.pause(); vadRef.current.destroy(); } catch { }
-        vadRef.current = null;
-      }
-      setIsListening(false);
-      setVadReady(false);
-      setUserSpeaking(false);
-      setAudioLevel(0);
-
-      setTimeout(() => {
-        const startFn = startListeningExternalRef.current;
-        if (startFn) {
-          console.log("Full mic re-init: calling startListening");
-          startFn();
+        // If VAD fails, perform full re-init
+        isActiveRef.current = false;
+        clearTimers();
+        stopRecording();
+        if (vadRef.current) {
+          try { vadRef.current.pause(); vadRef.current.destroy(); } catch { }
+          vadRef.current = null;
         }
-      }, 500);
-    } else {
-      setTimeout(() => {
-        if (isActiveRef.current && !recognitionRef.current) {
-          console.log("Recognition lost after resume, restarting...");
-          try { startRecognitionRef.current(); } catch { }
-        }
-      }, 1500);
+        setIsListening(false);
+        setVadReady(false);
+        setUserSpeaking(false);
+        setAudioLevel(0);
+
+        setTimeout(() => {
+          const startFn = startListeningExternalRef.current;
+          if (startFn) {
+            console.log("Full mic re-init: calling startListening");
+            startFn();
+          }
+        }, 500);
+      }
     }
 
     onSpeakEndRef.current?.();
-  }, [clearTimers, stopRecognition]);
+  }, [clearTimers, stopRecording]);
 
   const sarvamAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -862,25 +802,29 @@ export function useVoice({
     resumeAfterSpeaking();
   }, [resumeAfterSpeaking]);
 
-  useEffect(() => {
-    if (isActiveRef.current && recognitionRef.current) {
-      const currentLang = recognitionRef.current.lang;
-      if (currentLang !== language) {
-        stopRecognition();
-        setTimeout(() => {
-          if (isActiveRef.current) {
-            startRecognition();
-          }
-        }, 200);
-      }
-    }
-  }, [language, stopRecognition, startRecognition]);
+  // Language is passed dynamically to /api/stt at request time, no restart needed
 
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
       clearTimers();
-      stopRecognition();
+      stopRecording();
+
+      // Close media stream
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
+
+      if (mediaRecorderRef.current) {
+        try {
+          if (mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
+          }
+        } catch { }
+        mediaRecorderRef.current = null;
+      }
+
       if (vadRef.current) {
         try {
           vadRef.current.pause();
@@ -905,7 +849,7 @@ export function useVoice({
         audioContextRef.current = null;
       }
     };
-  }, [clearTimers, stopRecognition]);
+  }, [clearTimers, stopRecording]);
 
   return {
     isListening,

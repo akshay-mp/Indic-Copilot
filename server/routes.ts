@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import Anthropic from "@anthropic-ai/sdk";
 import WebSocket from "ws";
 import { randomUUID } from "crypto";
+import multer from "multer";
 
 
 const anthropic = new Anthropic({
@@ -354,7 +355,7 @@ export async function registerRoutes(
       if (shouldBuildApp) {
         let htmlContent = extractHtmlFromResponse(fullResponse);
         console.log(`[BUILD] HTML extraction result: ${htmlContent ? `success (${htmlContent.length} chars)` : "FAILED"}`);
-        
+
         if (htmlContent && !htmlContent.includes("</html>")) {
           console.warn("[BUILD] WARNING: Generated HTML appears truncated (missing </html> closing tag). Appending closing tags.");
           if (!htmlContent.includes("</script>")) {
@@ -792,7 +793,7 @@ export async function registerRoutes(
       if (!messages || !Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: "messages array required" });
       }
-      
+
       // Ensure language has a default if missing
       const appLanguage = language || "kn-IN";
 
@@ -874,12 +875,81 @@ export async function registerRoutes(
     }
   });
 
-  // --- Sarvam TTS ---
+  // --- Sarvam Language Mapping ---
   const sarvamLangMap: Record<string, string> = {
     "kn-IN": "kn-IN", "hi-IN": "hi-IN", "ta-IN": "ta-IN", "te-IN": "te-IN",
     "ml-IN": "ml-IN", "mr-IN": "mr-IN", "bn-IN": "bn-IN", "gu-IN": "gu-IN",
     "pa-IN": "pa-IN", "en-US": "en-IN", "en-IN": "en-IN", "or-IN": "od-IN", "od-IN": "od-IN",
   };
+
+  // --- Multer setup for file uploads ---
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 25 * 1024 * 1024 } // 25MB max
+  });
+
+  // --- Sarvam STT ---
+  app.post("/api/stt", upload.single("file"), async (req: any, res) => {
+    const apiKey = process.env.SARVAM_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "Sarvam API key not configured" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: "Audio file required" });
+    }
+
+    const language = req.body.language || "en-US";
+    const mode = req.body.mode || "transcribe";
+    const targetLang = sarvamLangMap[language] || "unknown";
+
+    try {
+      console.log(`[STT] Processing audio: ${req.file.size} bytes, lang: ${targetLang}, mode: ${mode}`);
+
+      // Create FormData for Sarvam API
+      const formData = new FormData();
+
+      // Convert buffer to Blob and append to FormData
+      const audioBlob = new Blob([req.file.buffer], { type: req.file.mimetype || "audio/webm" });
+      formData.append("file", audioBlob, "audio.webm");
+      formData.append("model", "saaras:v3");
+      formData.append("language_code", targetLang);
+      formData.append("mode", mode);
+
+      const sarvamRes = await fetch("https://api.sarvam.ai/speech-to-text", {
+        method: "POST",
+        headers: {
+          "api-subscription-key": apiKey,
+        },
+        body: formData,
+      });
+
+      if (!sarvamRes.ok) {
+        const errBody = await sarvamRes.text();
+        console.error("Sarvam STT API error:", errBody);
+        return res.status(sarvamRes.status).json({ error: "STT failed: " + errBody });
+      }
+
+      const data = await sarvamRes.json() as {
+        transcript: string;
+        language_code?: string;
+        language_probability?: number;
+      };
+
+      console.log(`[STT] Success: "${data.transcript.substring(0, 50)}..."`);
+
+      res.json({
+        transcript: data.transcript,
+        language_code: data.language_code,
+        language_probability: data.language_probability,
+      });
+    } catch (error: any) {
+      console.error("Sarvam STT error:", error.message || error);
+      res.status(500).json({ error: "STT failed: " + (error.message || "Unknown error") });
+    }
+  });
+
+  // --- Sarvam TTS ---
 
   app.post("/api/tts", async (req, res) => {
     const apiKey = process.env.SARVAM_API_KEY;
