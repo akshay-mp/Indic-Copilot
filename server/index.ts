@@ -24,6 +24,15 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+app.use((req, res, next) => {
+  const isServeEndpoint = req.path.includes("/serve");
+  if (!isServeEndpoint) {
+    res.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  }
+  next();
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",

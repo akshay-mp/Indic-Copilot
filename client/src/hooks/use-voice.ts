@@ -282,7 +282,7 @@ export function useVoice({
         baseAssetPath: "/",
         onnxWASMBasePath: "/",
         ortConfig: (ort: any) => {
-          ort.env.wasm.numThreads = 1;
+          ort.env.wasm.numThreads = 4;
         },
         stream: stream,
         pauseStream: async () => {},
