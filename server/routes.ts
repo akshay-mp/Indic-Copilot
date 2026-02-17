@@ -906,17 +906,17 @@ export async function registerRoutes(
     try {
       console.log(`[STT] Processing audio: ${req.file.size} bytes, lang: ${targetLang}, mode: ${mode}`);
 
-      // Create FormData for Sarvam API
       const formData = new FormData();
 
-      // Convert buffer to Blob and append to FormData
       const audioBlob = new Blob([req.file.buffer], { type: req.file.mimetype || "audio/webm" });
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "saaras:v3");
-      formData.append("language_code", targetLang);
+      if (targetLang && targetLang !== "unknown") {
+        formData.append("language_code", targetLang);
+      }
       formData.append("mode", mode);
 
-      const sarvamRes = await fetch("https://api.sarvam.ai/speech-to-text", {
+      const sarvamRes = await fetch("https://api.sarvam.ai/speech-to-text/transcribe", {
         method: "POST",
         headers: {
           "api-subscription-key": apiKey,

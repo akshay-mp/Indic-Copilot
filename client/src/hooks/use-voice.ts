@@ -264,17 +264,29 @@ export function useVoice({
     setVadReady(false);
 
     try {
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          autoGainControl: true,
+          noiseSuppression: true,
+        },
+      });
       mediaStreamRef.current = stream;
       console.log("[STT Client] Microphone access granted");
 
       const { MicVAD } = await import("@ricky0123/vad-web");
 
-      const vad = await MicVAD.new({
-        model: "v5" as any,
+      const vadOptions: any = {
+        model: "v5",
         baseAssetPath: "/",
         onnxWASMBasePath: "/",
+        ortConfig: (ort: any) => {
+          ort.env.wasm.numThreads = 1;
+        },
+        stream: stream,
+        pauseStream: async () => {},
+        resumeStream: async () => stream,
         positiveSpeechThreshold: 0.5,
         negativeSpeechThreshold: 0.3,
         redemptionMs: 500,
@@ -283,7 +295,6 @@ export function useVoice({
         onSpeechStart: () => {
           setUserSpeaking(true);
           setAudioLevel(0.7);
-          // Start recording when VAD detects speech
           startRecording();
         },
         onSpeechEnd: () => {
@@ -294,8 +305,11 @@ export function useVoice({
         onVADMisfire: () => {
           setUserSpeaking(false);
           setAudioLevel(0);
+          stopRecording();
         },
-      });
+      };
+
+      const vad = await MicVAD.new(vadOptions);
 
       if (!isActiveRef.current) {
         vad.destroy();
@@ -324,7 +338,7 @@ export function useVoice({
         mediaStreamRef.current = null;
       }
     }
-  }, [startRecording, handleSpeechEnd]);
+  }, [startRecording, handleSpeechEnd, stopRecording]);
 
   startListeningExternalRef.current = startListening;
 
