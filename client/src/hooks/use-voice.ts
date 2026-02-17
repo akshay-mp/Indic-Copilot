@@ -198,21 +198,26 @@ export function useVoice({
         const audioBlob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
         console.log("[STT Client] Recording stopped, blob size:", audioBlob.size);
 
-        // Send to STT API
+        setInterimTranscript("Transcribing...");
+
         const transcript = await sendAudioToSTT(audioBlob);
 
         if (transcript) {
           accumulatedTextRef.current = transcript;
           hasSpeechRef.current = true;
           setTranscript(transcript);
+          setInterimTranscript(transcript);
           onResultRef.current?.(transcript);
 
-          // Auto-send after getting transcript
           if (continuous && isActiveRef.current) {
-            setTimeout(() => {
-              doAutoSend(transcript);
-            }, 800);
+            doAutoSend(transcript);
           }
+        } else {
+          console.log("[STT Client] No transcript received, resuming listening");
+          setInterimTranscript("Couldn't hear that, try again...");
+          setTimeout(() => {
+            if (isActiveRef.current) setInterimTranscript("");
+          }, 2000);
         }
 
         audioChunksRef.current = [];

@@ -916,7 +916,7 @@ export async function registerRoutes(
       }
       formData.append("mode", mode);
 
-      const sarvamRes = await fetch("https://api.sarvam.ai/speech-to-text/transcribe", {
+      const sarvamRes = await fetch("https://api.sarvam.ai/speech-to-text", {
         method: "POST",
         headers: {
           "api-subscription-key": apiKey,
