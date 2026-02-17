@@ -105,7 +105,8 @@ Your role during the PLANNING phase:
 6. End your plan summary with: "Would you like me to build this app? Say 'yes' or 'approve' to start building!"
 
 CRITICAL LANGUAGE RULE: You MUST respond ENTIRELY in ${lang}. Every single word of your response must be in ${lang}. The user has selected ${lang} as their language. Do NOT use English unless ${lang} is English. This is non-negotiable.
-Keep responses concise and conversational - this is a voice-first interface designed for speaking aloud.`;
+Keep responses concise and conversational - this is a voice-first interface designed for speaking aloud.
+NEVER use emojis or special symbols in your responses. Your text will be read aloud by a text-to-speech engine, so emojis get spoken as their names (e.g. "waving hand"). Use only plain text.`;
 
 const SYSTEM_PROMPT_BUILD = (lang: string) => `You are Indic Copilot, an AI app builder. The user has approved the app plan. Now generate the complete app.
 
@@ -975,11 +976,12 @@ export async function registerRoutes(
           "api-subscription-key": apiKey,
         },
         body: JSON.stringify({
-          text: ttsText,
+          inputs: [ttsText],
           target_language_code: targetLang,
           speaker: "shubh",
           model: "bulbul:v3",
-          output_audio_codec: "wav",
+          audio_format: "wav",
+          enable_preprocessing: true,
         }),
       });
 

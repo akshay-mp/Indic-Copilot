@@ -791,7 +791,11 @@ export function useVoice({
 
   const speak = useCallback(
     async (text: string, lang?: string) => {
-      const trimmedText = (text || "").trim();
+      const cleanedText = (text || "")
+        .replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "")
+        .replace(/[\u2600-\u27BF\u2B50\u2702-\u27B0\uFE00-\uFE0F\u200D\u20E3]/g, "")
+        .replace(/\s{2,}/g, " ");
+      const trimmedText = cleanedText.trim();
       if (!trimmedText) {
         console.log("TTS speak: empty text, skipping");
         onSpeakEndRef.current?.();
