@@ -263,8 +263,10 @@ export function useVoice({
     setIsListening(true);
     setVadReady(false);
 
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      console.log("[STT Client] Requesting microphone access...");
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
@@ -274,35 +276,42 @@ export function useVoice({
       });
       mediaStreamRef.current = stream;
       console.log("[STT Client] Microphone access granted");
+    } catch (micErr) {
+      console.error("[STT Client] Microphone access denied:", micErr);
+      isActiveRef.current = false;
+      setIsListening(false);
+      return;
+    }
 
+    try {
+      console.log("[STT Client] Loading VAD module...");
       const { MicVAD } = await import("@ricky0123/vad-web");
+      console.log("[STT Client] VAD module loaded, creating instance...");
 
       const vadOptions: any = {
         model: "v5",
         baseAssetPath: "/",
         onnxWASMBasePath: "/",
-        ortConfig: (ort: any) => {
-          ort.env.wasm.numThreads = 4;
-        },
         stream: stream,
-        pauseStream: async () => {},
-        resumeStream: async () => stream,
         positiveSpeechThreshold: 0.5,
         negativeSpeechThreshold: 0.3,
         redemptionMs: 500,
         preSpeechPadMs: 200,
         minSpeechMs: 250,
         onSpeechStart: () => {
+          console.log("[STT Client] VAD: speech started");
           setUserSpeaking(true);
           setAudioLevel(0.7);
           startRecording();
         },
         onSpeechEnd: () => {
+          console.log("[STT Client] VAD: speech ended");
           setUserSpeaking(false);
           setAudioLevel(0.1);
           handleSpeechEnd();
         },
         onVADMisfire: () => {
+          console.log("[STT Client] VAD: misfire");
           setUserSpeaking(false);
           setAudioLevel(0);
           stopRecording();
@@ -310,6 +319,7 @@ export function useVoice({
       };
 
       const vad = await MicVAD.new(vadOptions);
+      console.log("[STT Client] VAD instance created successfully");
 
       if (!isActiveRef.current) {
         vad.destroy();
@@ -321,6 +331,7 @@ export function useVoice({
       vadRef.current = vad;
       vad.start();
       setVadReady(true);
+      console.log("[STT Client] VAD started, ready to listen");
 
       audioLevelIntervalRef.current = setInterval(() => {
         if (!isActiveRef.current) return;
@@ -329,14 +340,20 @@ export function useVoice({
           return prev + (target - prev) * 0.3;
         });
       }, 200);
-    } catch (err) {
-      console.error("[STT Client] Failed to initialize:", err);
-      isActiveRef.current = false;
-      setIsListening(false);
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach(track => track.stop());
-        mediaStreamRef.current = null;
-      }
+    } catch (vadErr) {
+      console.error("[STT Client] VAD initialization failed:", vadErr);
+      // VAD failed but we still have the mic stream
+      // Set vadReady so the UI doesn't stay stuck on "Initializing..."
+      setVadReady(true);
+      console.log("[STT Client] Proceeding without VAD - manual recording only");
+
+      audioLevelIntervalRef.current = setInterval(() => {
+        if (!isActiveRef.current) return;
+        setAudioLevel((prev) => {
+          const target = 0.05;
+          return prev + (target - prev) * 0.3;
+        });
+      }, 200);
     }
   }, [startRecording, handleSpeechEnd, stopRecording]);
 
