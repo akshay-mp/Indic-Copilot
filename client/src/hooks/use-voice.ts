@@ -40,7 +40,15 @@ export function useVoice({
   const [vadReady, setVadReady] = useState(false);
   const [userSpeaking, setUserSpeaking] = useState(false);
 
-  const vadRef = useRef<any>(null);
+  // AnalyserNode-based silence detection refs
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserCtxRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const energyMonitorPausedRef = useRef(false);
+  const speechStartTimeRef = useRef<number>(0);
+  const lastSpeechTimeRef = useRef<number>(0);
+  const isSpeechActiveRef = useRef(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -52,6 +60,11 @@ export function useVoice({
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioLevelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isRecordingRef = useRef(false);
+
+  // Energy-based silence detection constants
+  const SPEECH_THRESHOLD = 0.015;
+  const SILENCE_DURATION_MS = 1200;
+  const MIN_SPEECH_DURATION_MS = 300;
 
   const onAutoSendRef = useRef(onAutoSend);
   const onResultRef = useRef(onResult);
@@ -219,10 +232,25 @@ export function useVoice({
     stopRecording();
   }, [stopRecording]);
 
+  const stopEnergyMonitor = useCallback(() => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+  }, []);
+
   const stopListening = useCallback(() => {
     isActiveRef.current = false;
     clearTimers();
     stopRecording();
+    stopEnergyMonitor();
+
+    // Close analyser context
+    if (analyserCtxRef.current && analyserCtxRef.current.state !== "closed") {
+      analyserCtxRef.current.close().catch(() => { });
+      analyserCtxRef.current = null;
+    }
+    analyserRef.current = null;
 
     // Close media stream
     if (mediaStreamRef.current) {
@@ -230,13 +258,8 @@ export function useVoice({
       mediaStreamRef.current = null;
     }
 
-    if (vadRef.current) {
-      try {
-        vadRef.current.pause();
-        vadRef.current.destroy();
-      } catch { }
-      vadRef.current = null;
-    }
+    isSpeechActiveRef.current = false;
+    energyMonitorPausedRef.current = false;
 
     const finalText = accumulatedTextRef.current.trim();
     accumulatedTextRef.current = "";
@@ -251,22 +274,91 @@ export function useVoice({
     if (finalText && onAutoSendRef.current) {
       onAutoSendRef.current(finalText);
     }
-  }, [clearTimers, stopRecording]);
+  }, [clearTimers, stopRecording, stopEnergyMonitor]);
+
+  const startEnergyMonitor = useCallback(() => {
+    if (!analyserRef.current) return;
+
+    const analyser = analyserRef.current;
+    const dataArray = new Uint8Array(analyser.fftSize);
+
+    const monitor = () => {
+      if (!isActiveRef.current || energyMonitorPausedRef.current) {
+        animFrameRef.current = requestAnimationFrame(monitor);
+        return;
+      }
+
+      analyser.getByteTimeDomainData(dataArray);
+
+      // Compute RMS energy
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const normalized = (dataArray[i] - 128) / 128;
+        sum += normalized * normalized;
+      }
+      const rms = Math.sqrt(sum / dataArray.length);
+
+      // Update visual audio level
+      setAudioLevel(Math.min(rms * 5, 1));
+
+      const now = Date.now();
+
+      if (rms > SPEECH_THRESHOLD) {
+        lastSpeechTimeRef.current = now;
+
+        if (!isSpeechActiveRef.current) {
+          // Speech just started
+          isSpeechActiveRef.current = true;
+          speechStartTimeRef.current = now;
+          console.log("[STT Client] Energy VAD: speech started, RMS:", rms.toFixed(4));
+          setUserSpeaking(true);
+          setAudioLevel(0.7);
+          startRecording();
+        }
+      } else if (isSpeechActiveRef.current) {
+        const silenceDuration = now - lastSpeechTimeRef.current;
+        const speechDuration = now - speechStartTimeRef.current;
+
+        if (silenceDuration >= SILENCE_DURATION_MS) {
+          if (speechDuration >= MIN_SPEECH_DURATION_MS) {
+            // Valid speech ended — stop recording and send to STT
+            console.log("[STT Client] Energy VAD: speech ended after", speechDuration, "ms");
+            isSpeechActiveRef.current = false;
+            setUserSpeaking(false);
+            setAudioLevel(0.1);
+            handleSpeechEnd();
+          } else {
+            // Too short — misfire
+            console.log("[STT Client] Energy VAD: misfire (only", speechDuration, "ms)");
+            isSpeechActiveRef.current = false;
+            setUserSpeaking(false);
+            setAudioLevel(0);
+            stopRecording();
+          }
+        }
+      }
+
+      animFrameRef.current = requestAnimationFrame(monitor);
+    };
+
+    animFrameRef.current = requestAnimationFrame(monitor);
+  }, [startRecording, handleSpeechEnd, stopRecording]);
 
   const startListening = useCallback(async () => {
     if (isActiveRef.current) return;
     isActiveRef.current = true;
     accumulatedTextRef.current = "";
     hasSpeechRef.current = false;
+    isSpeechActiveRef.current = false;
+    energyMonitorPausedRef.current = false;
     setTranscript("");
     setInterimTranscript("");
     setIsListening(true);
     setVadReady(false);
 
-    let stream: MediaStream | null = null;
     try {
       console.log("[STT Client] Requesting microphone access...");
-      stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
@@ -276,86 +368,38 @@ export function useVoice({
       });
       mediaStreamRef.current = stream;
       console.log("[STT Client] Microphone access granted");
-    } catch (micErr) {
-      console.error("[STT Client] Microphone access denied:", micErr);
-      isActiveRef.current = false;
-      setIsListening(false);
-      return;
-    }
 
-    try {
-      console.log("[STT Client] Loading VAD module...");
-      const { MicVAD } = await import("@ricky0123/vad-web");
-      console.log("[STT Client] VAD module loaded, creating instance...");
-
-      const vadOptions: any = {
-        model: "v5",
-        baseAssetPath: "/",
-        onnxWASMBasePath: "/",
-        stream: stream,
-        positiveSpeechThreshold: 0.5,
-        negativeSpeechThreshold: 0.3,
-        redemptionMs: 500,
-        preSpeechPadMs: 200,
-        minSpeechMs: 250,
-        onSpeechStart: () => {
-          console.log("[STT Client] VAD: speech started");
-          setUserSpeaking(true);
-          setAudioLevel(0.7);
-          startRecording();
-        },
-        onSpeechEnd: () => {
-          console.log("[STT Client] VAD: speech ended");
-          setUserSpeaking(false);
-          setAudioLevel(0.1);
-          handleSpeechEnd();
-        },
-        onVADMisfire: () => {
-          console.log("[STT Client] VAD: misfire");
-          setUserSpeaking(false);
-          setAudioLevel(0);
-          stopRecording();
-        },
-      };
-
-      const vad = await MicVAD.new(vadOptions);
-      console.log("[STT Client] VAD instance created successfully");
+      // Set up AnalyserNode for energy-based silence detection
+      const audioCtx = new AudioContext();
+      analyserCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
       if (!isActiveRef.current) {
-        vad.destroy();
+        audioCtx.close().catch(() => { });
         stream.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
         return;
       }
 
-      vadRef.current = vad;
-      vad.start();
+      // Start energy monitoring — replaces Silero VAD
+      startEnergyMonitor();
       setVadReady(true);
-      console.log("[STT Client] VAD started, ready to listen");
-
-      audioLevelIntervalRef.current = setInterval(() => {
-        if (!isActiveRef.current) return;
-        setAudioLevel((prev) => {
-          const target = 0.05;
-          return prev + (target - prev) * 0.3;
-        });
-      }, 200);
-    } catch (vadErr) {
-      console.error("[STT Client] VAD initialization failed:", vadErr);
-      // VAD failed but we still have the mic stream
-      // Set vadReady so the UI doesn't stay stuck on "Initializing..."
-      setVadReady(true);
-      console.log("[STT Client] Proceeding without VAD - manual recording only");
-
-      audioLevelIntervalRef.current = setInterval(() => {
-        if (!isActiveRef.current) return;
-        setAudioLevel((prev) => {
-          const target = 0.05;
-          return prev + (target - prev) * 0.3;
-        });
-      }, 200);
+      console.log("[STT Client] AnalyserNode ready, listening for speech");
+    } catch (err) {
+      console.error("[STT Client] Failed to initialize:", err);
+      isActiveRef.current = false;
+      setIsListening(false);
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(track => track.stop());
+        mediaStreamRef.current = null;
+      }
     }
-  }, [startRecording, handleSpeechEnd, stopRecording]);
+  }, [startEnergyMonitor]);
 
   startListeningExternalRef.current = startListening;
 
@@ -379,9 +423,9 @@ export function useVoice({
   }, []);
 
   const prepareForSpeaking = useCallback(() => {
-    if (vadRef.current && isActiveRef.current) {
-      try { vadRef.current.pause(); } catch { }
-    }
+    // Pause energy monitor so TTS audio doesn't trigger speech detection
+    energyMonitorPausedRef.current = true;
+    isSpeechActiveRef.current = false;
     stopRecording();
     clearTimers();
   }, [stopRecording, clearTimers]);
@@ -394,38 +438,13 @@ export function useVoice({
       return;
     }
 
-    // Resume VAD
-    if (vadRef.current) {
-      try {
-        vadRef.current.start();
-        console.log("VAD resumed after speaking");
-      } catch (e) {
-        console.warn("VAD restart failed after speaking:", e);
-        // If VAD fails, perform full re-init
-        isActiveRef.current = false;
-        clearTimers();
-        stopRecording();
-        if (vadRef.current) {
-          try { vadRef.current.pause(); vadRef.current.destroy(); } catch { }
-          vadRef.current = null;
-        }
-        setIsListening(false);
-        setVadReady(false);
-        setUserSpeaking(false);
-        setAudioLevel(0);
-
-        setTimeout(() => {
-          const startFn = startListeningExternalRef.current;
-          if (startFn) {
-            console.log("Full mic re-init: calling startListening");
-            startFn();
-          }
-        }, 500);
-      }
-    }
+    // Resume energy monitor
+    energyMonitorPausedRef.current = false;
+    isSpeechActiveRef.current = false;
+    console.log("[STT Client] Energy monitor resumed after speaking");
 
     onSpeakEndRef.current?.();
-  }, [clearTimers, stopRecording]);
+  }, []);
 
   const sarvamAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -841,6 +860,19 @@ export function useVoice({
       clearTimers();
       stopRecording();
 
+      // Stop energy monitor
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+
+      // Close analyser context
+      if (analyserCtxRef.current && analyserCtxRef.current.state !== "closed") {
+        analyserCtxRef.current.close().catch(() => { });
+        analyserCtxRef.current = null;
+      }
+      analyserRef.current = null;
+
       // Close media stream
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach(track => track.stop());
@@ -856,13 +888,6 @@ export function useVoice({
         mediaRecorderRef.current = null;
       }
 
-      if (vadRef.current) {
-        try {
-          vadRef.current.pause();
-          vadRef.current.destroy();
-        } catch { }
-        vadRef.current = null;
-      }
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
